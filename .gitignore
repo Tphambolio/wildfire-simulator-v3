@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.nbc
+*.nbi
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg
+.env
+.venv/
+node_modules/
+coverage/
+htmlcov/
+.coverage
