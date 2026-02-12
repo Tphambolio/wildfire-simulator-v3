@@ -1,0 +1,355 @@
+/* FireSim V3 — Global styles */
+
+:root {
+  --bg-dark: #1a1a2e;
+  --bg-panel: #16213e;
+  --bg-section: #0f3460;
+  --text-primary: #e4e4e4;
+  --text-secondary: #a0a0b0;
+  --accent: #ff6b35;
+  --accent-hover: #ff8f5e;
+  --fire-red: #f44336;
+  --fire-orange: #ff9800;
+  --fire-yellow: #ffeb3b;
+  --success: #4caf50;
+  --border: #2a2a4a;
+  --radius: 8px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg-dark);
+  color: var(--text-primary);
+  overflow: hidden;
+  height: 100vh;
+}
+
+#root {
+  height: 100vh;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Header */
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  z-index: 10;
+}
+
+.app-header h1 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.app-header .subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.status-badge {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-running {
+  background: rgba(255, 152, 0, 0.2);
+  color: var(--fire-orange);
+}
+
+.status-completed {
+  background: rgba(76, 175, 80, 0.2);
+  color: var(--success);
+}
+
+.status-failed {
+  background: rgba(244, 67, 54, 0.2);
+  color: var(--fire-red);
+}
+
+/* Layout */
+.app-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 320px;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.map-area {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.map-area > div:first-child {
+  flex: 1;
+}
+
+/* Panels */
+.panel {
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.panel h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  margin-top: 4px;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-style: italic;
+  padding: 8px 0;
+}
+
+.ignition-info {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  background: var(--bg-section);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  font-family: monospace;
+}
+
+/* Form controls */
+.section {
+  margin-bottom: 10px;
+}
+
+label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+label strong {
+  color: var(--text-primary);
+  min-width: 60px;
+  text-align: right;
+}
+
+input[type="range"] {
+  width: 100%;
+  margin-top: 2px;
+  accent-color: var(--accent);
+  height: 4px;
+}
+
+select {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg-section);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+/* Buttons */
+.btn-primary {
+  width: 100%;
+  padding: 10px;
+  margin-top: 8px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-advanced {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 0;
+  text-decoration: underline;
+}
+
+.toggle-advanced:hover {
+  color: var(--text-primary);
+}
+
+/* Metrics */
+.metric-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.metric {
+  background: var(--bg-section);
+  padding: 8px;
+  border-radius: var(--radius);
+}
+
+.metric-label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.metric-value {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* Fuel breakdown */
+.fuel-breakdown {
+  margin-top: 10px;
+}
+
+.fuel-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.fuel-label {
+  font-size: 11px;
+  width: 30px;
+  font-weight: 600;
+}
+
+.fuel-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-dark);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.fuel-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.fuel-pct {
+  font-size: 11px;
+  color: var(--text-secondary);
+  width: 30px;
+  text-align: right;
+}
+
+/* Time slider */
+.time-slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+}
+
+.time-slider input[type="range"] {
+  flex: 1;
+}
+
+.time-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: monospace;
+  min-width: 60px;
+}
+
+/* Error toast */
+.error-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  background: rgba(244, 67, 54, 0.9);
+  color: white;
+  border-radius: var(--radius);
+  font-size: 14px;
+  z-index: 100;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* Mapbox overrides */
+.mapboxgl-canvas {
+  outline: none;
+}
+
+.mapboxgl-ctrl-group {
+  background: var(--bg-panel) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.mapboxgl-ctrl-group button {
+  filter: invert(0.8);
+}
