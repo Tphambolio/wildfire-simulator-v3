@@ -1,13 +1,39 @@
-/** Mapbox GL map with fire perimeter rendering. */
+/** Mapbox GL map with fire perimeter rendering.
+ *
+ * Uses Mapbox satellite style when VITE_MAPBOX_TOKEN is set,
+ * otherwise falls back to free OpenStreetMap raster tiles.
+ */
 
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useEffect, useRef, useState } from "react";
 import type { SimulationFrame } from "../types/simulation";
 
-// Set your Mapbox token via VITE_MAPBOX_TOKEN environment variable
-// Create a .env.local file: VITE_MAPBOX_TOKEN=pk.your_token_here
-mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || "";
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || "";
+mapboxgl.accessToken = MAPBOX_TOKEN;
+
+/** Free OSM raster style — works without any token. */
+const OSM_STYLE: mapboxgl.StyleSpecification = {
+  version: 8,
+  name: "OSM",
+  sources: {
+    osm: {
+      type: "raster",
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      attribution: "&copy; OpenStreetMap contributors",
+    },
+  },
+  layers: [
+    {
+      id: "osm-tiles",
+      type: "raster",
+      source: "osm",
+      minzoom: 0,
+      maxzoom: 19,
+    },
+  ],
+};
 
 interface MapViewProps {
   frames: SimulationFrame[];
@@ -31,9 +57,13 @@ export default function MapView({
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
 
+    const style = MAPBOX_TOKEN
+      ? "mapbox://styles/mapbox/satellite-streets-v12"
+      : OSM_STYLE;
+
     const m = new mapboxgl.Map({
       container: mapContainer.current,
-      style: "mapbox://styles/mapbox/satellite-streets-v12",
+      style,
       center: [-114.0, 51.0], // Central Alberta default
       zoom: 10,
     });
@@ -125,7 +155,7 @@ export default function MapView({
       el.className = "ignition-marker";
       el.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none">
         <circle cx="12" cy="12" r="10" fill="#ff3d00" stroke="white" stroke-width="2"/>
-        <text x="12" y="16" text-anchor="middle" fill="white" font-size="12" font-weight="bold">🔥</text>
+        <text x="12" y="16" text-anchor="middle" fill="white" font-size="12" font-weight="bold">&#x1F525;</text>
       </svg>`;
 
       markerRef.current = new mapboxgl.Marker(el)
