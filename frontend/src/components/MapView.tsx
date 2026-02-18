@@ -12,65 +12,67 @@ import type { SimulationFrame } from "../types/simulation";
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || "";
 
-type BasemapId = "osm" | "topo" | "satellite";
+type BasemapId = string;
 
-const BASEMAPS: Record<BasemapId, { label: string; style: () => maplibregl.StyleSpecification }> = {
+type BasemapConfig = { label: string; style: () => maplibregl.StyleSpecification };
+
+const BASEMAPS: Record<string, BasemapConfig> = {
   osm: {
     label: "Street",
     style: () => ({
-      version: 8,
+      version: 8 as const,
       name: "OSM",
       sources: {
         osm: {
-          type: "raster",
+          type: "raster" as const,
           tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
           tileSize: 256,
           attribution: "&copy; OpenStreetMap contributors",
         },
       },
-      layers: [{ id: "osm-tiles", type: "raster", source: "osm", minzoom: 0, maxzoom: 19 }],
+      layers: [{ id: "osm-tiles", type: "raster" as const, source: "osm", minzoom: 0, maxzoom: 19 }],
     }),
   },
   topo: {
     label: "Topo",
     style: () => ({
-      version: 8,
+      version: 8 as const,
       name: "Topo",
       sources: {
         topo: {
-          type: "raster",
+          type: "raster" as const,
           tiles: ["https://tile.opentopomap.org/{z}/{x}/{y}.png"],
           tileSize: 256,
           attribution: "&copy; OpenTopoMap &copy; OpenStreetMap",
           maxzoom: 17,
         },
       },
-      layers: [{ id: "topo-tiles", type: "raster", source: "topo", minzoom: 0, maxzoom: 17 }],
+      layers: [{ id: "topo-tiles", type: "raster" as const, source: "topo", minzoom: 0, maxzoom: 17 }],
     }),
   },
-  ...(MAPBOX_TOKEN
-    ? {
-        satellite: {
-          label: "Satellite",
-          style: () => ({
-            version: 8 as const,
-            name: "Satellite",
-            sources: {
-              mapbox: {
-                type: "raster" as const,
-                tiles: [
-                  `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`,
-                ],
-                tileSize: 512,
-                attribution: "&copy; Mapbox &copy; OpenStreetMap",
-              },
-            },
-            layers: [{ id: "mapbox-tiles", type: "raster" as const, source: "mapbox" }],
-          }),
-        },
-      }
-    : {}),
 };
+
+// Add satellite option only when Mapbox token is available
+if (MAPBOX_TOKEN) {
+  BASEMAPS.satellite = {
+    label: "Satellite",
+    style: () => ({
+      version: 8 as const,
+      name: "Satellite",
+      sources: {
+        mapbox: {
+          type: "raster" as const,
+          tiles: [
+            `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`,
+          ],
+          tileSize: 512,
+          attribution: "&copy; Mapbox &copy; OpenStreetMap",
+        },
+      },
+      layers: [{ id: "mapbox-tiles", type: "raster" as const, source: "mapbox" }],
+    }),
+  };
+}
 
 interface MapViewProps {
   frames: SimulationFrame[];

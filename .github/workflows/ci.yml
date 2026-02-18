@@ -33,7 +33,8 @@ jobs:
       - name: Check no empty test files
         run: |
           for f in $(find . -name "test_*.py" -path "*/tests/*"); do
-            count=$(grep -c "^def test_" "$f" || true)
+            # Match def test_ and async def test_, any indent level
+            count=$(grep -cE "^\s*(async\s+)?def test_" "$f" || true)
             if [ "$count" -eq 0 ]; then
               echo "ERROR: Empty test file: $f"
               exit 1
