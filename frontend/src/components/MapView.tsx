@@ -1,39 +1,51 @@
-/** Mapbox GL map with fire perimeter rendering.
+/** MapLibre GL map with fire perimeter rendering.
  *
- * Uses Mapbox satellite style when VITE_MAPBOX_TOKEN is set,
- * otherwise falls back to free OpenStreetMap raster tiles.
+ * Uses MapLibre GL (open-source, no token required) with
+ * OpenStreetMap raster tiles by default, or Mapbox satellite
+ * when VITE_MAPBOX_TOKEN is set.
  */
 
-import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 import type { SimulationFrame } from "../types/simulation";
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || "";
-mapboxgl.accessToken = MAPBOX_TOKEN;
 
-/** Free OSM raster style — works without any token. */
-const OSM_STYLE: mapboxgl.StyleSpecification = {
-  version: 8,
-  name: "OSM",
-  sources: {
-    osm: {
-      type: "raster",
-      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-      tileSize: 256,
-      attribution: "&copy; OpenStreetMap contributors",
+function getMapStyle(): maplibregl.StyleSpecification {
+  if (MAPBOX_TOKEN) {
+    return {
+      version: 8,
+      name: "Satellite",
+      sources: {
+        mapbox: {
+          type: "raster",
+          tiles: [
+            `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`,
+          ],
+          tileSize: 512,
+          attribution: "&copy; Mapbox &copy; OpenStreetMap",
+        },
+      },
+      layers: [{ id: "mapbox-tiles", type: "raster", source: "mapbox" }],
+    };
+  }
+  return {
+    version: 8,
+    name: "OSM",
+    sources: {
+      osm: {
+        type: "raster",
+        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        tileSize: 256,
+        attribution: "&copy; OpenStreetMap contributors",
+      },
     },
-  },
-  layers: [
-    {
-      id: "osm-tiles",
-      type: "raster",
-      source: "osm",
-      minzoom: 0,
-      maxzoom: 19,
-    },
-  ],
-};
+    layers: [
+      { id: "osm-tiles", type: "raster", source: "osm", minzoom: 0, maxzoom: 19 },
+    ],
+  };
+}
 
 interface MapViewProps {
   frames: SimulationFrame[];
@@ -49,29 +61,24 @@ export default function MapView({
   ignitionPoint,
 }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
-  const map = useRef<mapboxgl.Map | null>(null);
-  const markerRef = useRef<mapboxgl.Marker | null>(null);
+  const map = useRef<maplibregl.Map | null>(null);
+  const markerRef = useRef<maplibregl.Marker | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
   // Initialize map
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
 
-    const style = MAPBOX_TOKEN
-      ? "mapbox://styles/mapbox/satellite-streets-v12"
-      : OSM_STYLE;
-
-    const m = new mapboxgl.Map({
+    const m = new maplibregl.Map({
       container: mapContainer.current,
-      style,
-      center: [-114.0, 51.0], // Central Alberta default
+      style: getMapStyle(),
+      center: [-114.0, 51.0],
       zoom: 10,
     });
 
-    m.addControl(new mapboxgl.NavigationControl(), "top-right");
+    m.addControl(new maplibregl.NavigationControl(), "top-right");
 
     m.on("load", () => {
-      // Fire perimeter source and layers
       m.addSource("fire-perimeter", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -105,7 +112,6 @@ export default function MapView({
         },
       });
 
-      // All past perimeters (lighter)
       m.addSource("fire-history", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -158,7 +164,7 @@ export default function MapView({
         <text x="12" y="16" text-anchor="middle" fill="white" font-size="12" font-weight="bold">&#x1F525;</text>
       </svg>`;
 
-      markerRef.current = new mapboxgl.Marker(el)
+      markerRef.current = new maplibregl.Marker({ element: el })
         .setLngLat([ignitionPoint.lng, ignitionPoint.lat])
         .addTo(map.current);
 
@@ -177,7 +183,6 @@ export default function MapView({
     const currentFrame = frames[currentFrameIndex];
     if (!currentFrame || currentFrame.perimeter.length < 3) return;
 
-    // Convert perimeter to GeoJSON [lng, lat] order
     const coords = currentFrame.perimeter.map(([lat, lng]) => [lng, lat]);
     if (
       coords.length > 1 &&
@@ -202,11 +207,10 @@ export default function MapView({
       ],
     };
 
-    (map.current.getSource("fire-perimeter") as mapboxgl.GeoJSONSource)?.setData(
+    (map.current.getSource("fire-perimeter") as maplibregl.GeoJSONSource)?.setData(
       currentGeoJSON
     );
 
-    // History: all frames up to current
     const historyFeatures: GeoJSON.Feature[] = frames
       .slice(1, currentFrameIndex)
       .filter((f) => f.perimeter.length >= 3)
@@ -222,7 +226,7 @@ export default function MapView({
         };
       });
 
-    (map.current.getSource("fire-history") as mapboxgl.GeoJSONSource)?.setData({
+    (map.current.getSource("fire-history") as maplibregl.GeoJSONSource)?.setData({
       type: "FeatureCollection",
       features: historyFeatures,
     });
