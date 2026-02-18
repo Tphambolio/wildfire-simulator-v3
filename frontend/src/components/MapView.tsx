@@ -163,6 +163,8 @@ export default function MapView({
 
     m.on("load", () => {
       addFireLayers(m);
+      // Force resize after layout settles to ensure tiles load
+      m.resize();
       setMapReady(true);
     });
 
@@ -172,7 +174,11 @@ export default function MapView({
 
     map.current = m;
 
+    // Resize again after CSS flexbox layout is finalized
+    const resizeTimer = setTimeout(() => m.resize(), 200);
+
     return () => {
+      clearTimeout(resizeTimer);
       m.remove();
       map.current = null;
     };
