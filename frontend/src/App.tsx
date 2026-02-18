@@ -13,6 +13,7 @@ export default function App() {
     lat: number;
     lng: number;
   } | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const {
     status,
@@ -41,6 +42,13 @@ export default function App() {
       <header className="app-header">
         <h1>FireSim V3</h1>
         <span className="subtitle">Canadian FBP Wildfire Spread Simulator</span>
+        <button
+          className="sidebar-toggle"
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          aria-label="Toggle sidebar"
+        >
+          {sidebarOpen ? "\u2715" : "\u2630"}
+        </button>
         {status && (
           <span className={`status-badge status-${status}`}>
             {status}
@@ -49,7 +57,7 @@ export default function App() {
       </header>
 
       <div className="app-content">
-        <aside className="sidebar">
+        <aside className={`sidebar${sidebarOpen ? "" : " collapsed"}`}>
           <WeatherPanel
             onStartSimulation={handleStartSimulation}
             ignitionPoint={ignitionPoint}

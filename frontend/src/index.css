@@ -340,16 +340,113 @@ select {
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
-/* Mapbox overrides */
-.mapboxgl-canvas {
+/* MapLibre overrides */
+.maplibregl-canvas {
   outline: none;
 }
 
-.mapboxgl-ctrl-group {
+.maplibregl-ctrl-group {
   background: var(--bg-panel) !important;
   border: 1px solid var(--border) !important;
 }
 
-.mapboxgl-ctrl-group button {
+.maplibregl-ctrl-group button {
   filter: invert(0.8);
+}
+
+.maplibregl-ctrl-attrib {
+  background: rgba(26, 26, 46, 0.7) !important;
+  color: var(--text-secondary) !important;
+  font-size: 10px !important;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: var(--text-secondary) !important;
+}
+
+/* Basemap toggle */
+.basemap-toggle {
+  position: absolute;
+  bottom: 48px;
+  right: 10px;
+  display: flex;
+  gap: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  z-index: 5;
+}
+
+.basemap-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.basemap-btn:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.basemap-btn:last-child {
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.basemap-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.basemap-btn:hover:not(.active) {
+  background: var(--bg-section);
+  color: var(--text-primary);
+}
+
+/* Mobile sidebar toggle */
+.sidebar-toggle {
+  display: none;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+/* Responsive layout */
+@media (max-width: 768px) {
+  .app-header .subtitle {
+    display: none;
+  }
+
+  .sidebar-toggle {
+    display: block;
+  }
+
+  .app-content {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    min-width: unset;
+    max-height: 50vh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar.collapsed {
+    display: none;
+  }
+
+  .map-area {
+    min-height: 300px;
+  }
 }

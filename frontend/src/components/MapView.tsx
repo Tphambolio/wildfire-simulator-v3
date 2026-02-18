@@ -1,51 +1,76 @@
-/** MapLibre GL map with fire perimeter rendering.
+/** MapLibre GL map with fire perimeter rendering and basemap toggle.
  *
  * Uses MapLibre GL (open-source, no token required) with
- * OpenStreetMap raster tiles by default, or Mapbox satellite
- * when VITE_MAPBOX_TOKEN is set.
+ * OpenStreetMap raster tiles by default. Supports switching between
+ * OSM, topo, and satellite (when VITE_MAPBOX_TOKEN is set) basemaps.
  */
 
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { SimulationFrame } from "../types/simulation";
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || "";
 
-function getMapStyle(): maplibregl.StyleSpecification {
-  if (MAPBOX_TOKEN) {
-    return {
+type BasemapId = "osm" | "topo" | "satellite";
+
+const BASEMAPS: Record<BasemapId, { label: string; style: () => maplibregl.StyleSpecification }> = {
+  osm: {
+    label: "Street",
+    style: () => ({
       version: 8,
-      name: "Satellite",
+      name: "OSM",
       sources: {
-        mapbox: {
+        osm: {
           type: "raster",
-          tiles: [
-            `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`,
-          ],
-          tileSize: 512,
-          attribution: "&copy; Mapbox &copy; OpenStreetMap",
+          tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+          tileSize: 256,
+          attribution: "&copy; OpenStreetMap contributors",
         },
       },
-      layers: [{ id: "mapbox-tiles", type: "raster", source: "mapbox" }],
-    };
-  }
-  return {
-    version: 8,
-    name: "OSM",
-    sources: {
-      osm: {
-        type: "raster",
-        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-        tileSize: 256,
-        attribution: "&copy; OpenStreetMap contributors",
+      layers: [{ id: "osm-tiles", type: "raster", source: "osm", minzoom: 0, maxzoom: 19 }],
+    }),
+  },
+  topo: {
+    label: "Topo",
+    style: () => ({
+      version: 8,
+      name: "Topo",
+      sources: {
+        topo: {
+          type: "raster",
+          tiles: ["https://tile.opentopomap.org/{z}/{x}/{y}.png"],
+          tileSize: 256,
+          attribution: "&copy; OpenTopoMap &copy; OpenStreetMap",
+          maxzoom: 17,
+        },
       },
-    },
-    layers: [
-      { id: "osm-tiles", type: "raster", source: "osm", minzoom: 0, maxzoom: 19 },
-    ],
-  };
-}
+      layers: [{ id: "topo-tiles", type: "raster", source: "topo", minzoom: 0, maxzoom: 17 }],
+    }),
+  },
+  ...(MAPBOX_TOKEN
+    ? {
+        satellite: {
+          label: "Satellite",
+          style: () => ({
+            version: 8 as const,
+            name: "Satellite",
+            sources: {
+              mapbox: {
+                type: "raster" as const,
+                tiles: [
+                  `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`,
+                ],
+                tileSize: 512,
+                attribution: "&copy; Mapbox &copy; OpenStreetMap",
+              },
+            },
+            layers: [{ id: "mapbox-tiles", type: "raster" as const, source: "mapbox" }],
+          }),
+        },
+      }
+    : {}),
+};
 
 interface MapViewProps {
   frames: SimulationFrame[];
@@ -64,6 +89,64 @@ export default function MapView({
   const map = useRef<maplibregl.Map | null>(null);
   const markerRef = useRef<maplibregl.Marker | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  const [basemap, setBasemap] = useState<BasemapId>("osm");
+
+  const addFireLayers = useCallback((m: maplibregl.Map) => {
+    if (m.getSource("fire-perimeter")) return;
+
+    m.addSource("fire-perimeter", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+
+    m.addLayer({
+      id: "fire-fill",
+      type: "fill",
+      source: "fire-perimeter",
+      paint: {
+        "fill-color": [
+          "interpolate",
+          ["linear"],
+          ["get", "hfi"],
+          0, "#ffeb3b",
+          2000, "#ff9800",
+          4000, "#f44336",
+          10000, "#b71c1c",
+        ],
+        "fill-opacity": 0.4,
+      },
+    });
+
+    m.addLayer({
+      id: "fire-outline",
+      type: "line",
+      source: "fire-perimeter",
+      paint: {
+        "line-color": "#ff3d00",
+        "line-width": 2.5,
+      },
+    });
+
+    m.addSource("fire-history", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+
+    m.addLayer(
+      {
+        id: "fire-history-outline",
+        type: "line",
+        source: "fire-history",
+        paint: {
+          "line-color": "#ff9800",
+          "line-width": 1,
+          "line-opacity": 0.5,
+          "line-dasharray": [2, 2],
+        },
+      },
+      "fire-fill"
+    );
+  }, []);
 
   // Initialize map
   useEffect(() => {
@@ -71,7 +154,7 @@ export default function MapView({
 
     const m = new maplibregl.Map({
       container: mapContainer.current,
-      style: getMapStyle(),
+      style: BASEMAPS.osm.style(),
       center: [-114.0, 51.0],
       zoom: 10,
     });
@@ -79,59 +162,7 @@ export default function MapView({
     m.addControl(new maplibregl.NavigationControl(), "top-right");
 
     m.on("load", () => {
-      m.addSource("fire-perimeter", {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-      });
-
-      m.addLayer({
-        id: "fire-fill",
-        type: "fill",
-        source: "fire-perimeter",
-        paint: {
-          "fill-color": [
-            "interpolate",
-            ["linear"],
-            ["get", "hfi"],
-            0, "#ffeb3b",
-            2000, "#ff9800",
-            4000, "#f44336",
-            10000, "#b71c1c",
-          ],
-          "fill-opacity": 0.4,
-        },
-      });
-
-      m.addLayer({
-        id: "fire-outline",
-        type: "line",
-        source: "fire-perimeter",
-        paint: {
-          "line-color": "#ff3d00",
-          "line-width": 2.5,
-        },
-      });
-
-      m.addSource("fire-history", {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-      });
-
-      m.addLayer(
-        {
-          id: "fire-history-outline",
-          type: "line",
-          source: "fire-history",
-          paint: {
-            "line-color": "#ff9800",
-            "line-width": 1,
-            "line-opacity": 0.5,
-            "line-dasharray": [2, 2],
-          },
-        },
-        "fire-fill"
-      );
-
+      addFireLayers(m);
       setMapReady(true);
     });
 
@@ -146,6 +177,17 @@ export default function MapView({
       map.current = null;
     };
   }, []);
+
+  // Switch basemap
+  useEffect(() => {
+    if (!map.current || !mapReady) return;
+    const entry = BASEMAPS[basemap];
+    if (!entry) return;
+    map.current.setStyle(entry.style());
+    map.current.once("style.load", () => {
+      addFireLayers(map.current!);
+    });
+  }, [basemap, mapReady, addFireLayers]);
 
   // Update ignition marker
   useEffect(() => {
@@ -233,6 +275,19 @@ export default function MapView({
   }, [frames, currentFrameIndex, mapReady]);
 
   return (
-    <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
+    <div style={{ width: "100%", height: "100%", position: "relative" }}>
+      <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
+      <div className="basemap-toggle">
+        {(Object.keys(BASEMAPS) as BasemapId[]).map((id) => (
+          <button
+            key={id}
+            className={`basemap-btn${basemap === id ? " active" : ""}`}
+            onClick={() => setBasemap(id)}
+          >
+            {BASEMAPS[id].label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
