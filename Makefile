@@ -9,7 +9,7 @@ test:
 	PYTHONPATH=engine/src:api/src python -m pytest engine/tests/ api/tests/ -v --tb=short
 
 test-engine:
-	python -m pytest engine/tests/ -v --tb=short
+	PYTHONPATH=engine/src python -m pytest engine/tests/ -v --tb=short
 
 test-api:
 	PYTHONPATH=engine/src:api/src python -m pytest api/tests/ -v --tb=short
