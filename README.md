@@ -18,7 +18,7 @@ Simulates wildfire spread using the Canadian Forest Fire Behavior Prediction (FB
 |-------|-----------|
 | Fire engine | Python 3.10+ with Numba JIT |
 | API | FastAPI + WebSocket |
-| Frontend | React + Vite + TypeScript + Mapbox GL JS |
+| Frontend | React + Vite + TypeScript + MapLibre GL |
 | Deploy | Docker Compose |
 
 ## Quick start
@@ -59,7 +59,7 @@ make test
 ```
 engine/     Pure Python fire science (zero web deps, 294 tests)
 api/        FastAPI backend with WebSocket streaming (6 tests)
-frontend/   React + Vite + TypeScript + Mapbox GL
+frontend/   React + Vite + TypeScript + MapLibre GL
 ```
 
 ## API
