@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  engine-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: pip install numpy numba pytest pytest-asyncio httpx fastapi uvicorn pydantic
+
+      - name: Test engine
+        run: PYTHONPATH=engine/src python -m pytest engine/tests/ -v --tb=short
+
+      - name: Test API
+        run: PYTHONPATH=engine/src:api/src python -m pytest api/tests/ -v --tb=short
+
+      - name: Check no empty test files
+        run: |
+          for f in $(find . -name "test_*.py" -path "*/tests/*"); do
+            count=$(grep -c "^def test_" "$f" || true)
+            if [ "$count" -eq 0 ]; then
+              echo "ERROR: Empty test file: $f"
+              exit 1
+            fi
+          done
+          echo "All test files contain at least one test function."
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install and check
+        working-directory: frontend
+        run: |
+          npm ci
+          npx tsc --noEmit
+          npm run build
