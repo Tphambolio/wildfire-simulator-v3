@@ -92,9 +92,23 @@ export default function MapView({
   const markerRef = useRef<maplibregl.Marker | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [basemap, setBasemap] = useState<BasemapId>("osm");
+  // Counter incremented each time fire layers are (re-)added to the map.
+  // The perimeter-update effect depends on this so it re-runs after
+  // basemap switches that destroy and recreate sources.
+  const [fireLayersVersion, setFireLayersVersion] = useState(0);
+  const prevBasemapRef = useRef<BasemapId>("osm");
 
   const addFireLayers = useCallback((m: maplibregl.Map) => {
-    if (m.getSource("fire-perimeter")) return;
+    // Remove stale sources if they somehow survived (defensive)
+    if (m.getSource("fire-perimeter")) {
+      if (m.getLayer("fire-outline")) m.removeLayer("fire-outline");
+      if (m.getLayer("fire-fill")) m.removeLayer("fire-fill");
+      m.removeSource("fire-perimeter");
+    }
+    if (m.getSource("fire-history")) {
+      if (m.getLayer("fire-history-outline")) m.removeLayer("fire-history-outline");
+      m.removeSource("fire-history");
+    }
 
     m.addSource("fire-perimeter", {
       type: "geojson",
@@ -115,7 +129,7 @@ export default function MapView({
           4000, "#f44336",
           10000, "#b71c1c",
         ],
-        "fill-opacity": 0.4,
+        "fill-opacity": 0.5,
       },
     });
 
@@ -148,6 +162,9 @@ export default function MapView({
       },
       "fire-fill"
     );
+
+    // Signal that fire layers are ready — triggers perimeter data re-apply
+    setFireLayersVersion((v) => v + 1);
   }, []);
 
   // Initialize map
@@ -165,7 +182,6 @@ export default function MapView({
 
     m.on("load", () => {
       addFireLayers(m);
-      // Force resize after layout settles to ensure tiles load
       m.resize();
       setMapReady(true);
     });
@@ -176,7 +192,6 @@ export default function MapView({
 
     map.current = m;
 
-    // Resize again after CSS flexbox layout is finalized
     const resizeTimer = setTimeout(() => m.resize(), 200);
 
     return () => {
@@ -186,9 +201,13 @@ export default function MapView({
     };
   }, []);
 
-  // Switch basemap
+  // Switch basemap — only when the user actually changes the basemap
   useEffect(() => {
     if (!map.current || !mapReady) return;
+    // Skip on initial render (style already set in constructor)
+    if (basemap === prevBasemapRef.current) return;
+    prevBasemapRef.current = basemap;
+
     const entry = BASEMAPS[basemap];
     if (!entry) return;
     map.current.setStyle(entry.style());
@@ -226,9 +245,13 @@ export default function MapView({
     }
   }, [ignitionPoint]);
 
-  // Update fire perimeter on map
+  // Update fire perimeter on map — depends on fireLayersVersion so it
+  // re-runs after basemap switches recreate the GeoJSON sources.
   useEffect(() => {
     if (!map.current || !mapReady || frames.length === 0) return;
+
+    const src = map.current.getSource("fire-perimeter") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
 
     const currentFrame = frames[currentFrameIndex];
     if (!currentFrame || currentFrame.perimeter.length < 3) return;
@@ -257,9 +280,10 @@ export default function MapView({
       ],
     };
 
-    (map.current.getSource("fire-perimeter") as maplibregl.GeoJSONSource)?.setData(
-      currentGeoJSON
-    );
+    src.setData(currentGeoJSON);
+
+    const historySrc = map.current.getSource("fire-history") as maplibregl.GeoJSONSource | undefined;
+    if (!historySrc) return;
 
     const historyFeatures: GeoJSON.Feature[] = frames
       .slice(1, currentFrameIndex)
@@ -276,11 +300,11 @@ export default function MapView({
         };
       });
 
-    (map.current.getSource("fire-history") as maplibregl.GeoJSONSource)?.setData({
+    historySrc.setData({
       type: "FeatureCollection",
       features: historyFeatures,
     });
-  }, [frames, currentFrameIndex, mapReady]);
+  }, [frames, currentFrameIndex, mapReady, fireLayersVersion]);
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
