@@ -5,7 +5,9 @@ import MapView from "./components/MapView";
 import WeatherPanel from "./components/WeatherPanel";
 import type { RunParams } from "./components/WeatherPanel";
 import FireMetrics from "./components/FireMetrics";
+import EOCSummary from "./components/EOCSummary";
 import TimeSlider from "./components/TimeSlider";
+import { FUEL_TYPES } from "./types/simulation";
 import { useSimulation } from "./hooks/useSimulation";
 import { computeBurnProbability } from "./services/api";
 import type { SimulationCreate, SimulationFrame, BurnProbabilityRequest, BurnProbabilityResponse } from "./types/simulation";
@@ -299,6 +301,17 @@ export default function App() {
             frame={currentFrame}
             status={status}
             totalFrames={frames.length}
+          />
+          <EOCSummary
+            frames={frames}
+            burnProbData={burnProbabilityData}
+            runParams={lastRunParams}
+            ignitionPoint={ignitionPoint}
+            fuelTypeLabel={
+              lastRunParams?.fuel_type
+                ? `${lastRunParams.fuel_type} — ${FUEL_TYPES[lastRunParams.fuel_type] ?? ""}`
+                : undefined
+            }
           />
         </aside>
 

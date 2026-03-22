@@ -82,6 +82,7 @@ export interface RunParams {
   danger_rating: string;
   n_iterations: number;
   duration_hours: number;
+  fuel_type?: string;
 }
 
 interface WeatherPanelProps {
@@ -166,6 +167,7 @@ export default function WeatherPanel({
       danger_rating: liveDanger,
       n_iterations: mcIterations,
       duration_hours: durationHours,
+      fuel_type: fuelType,
     });
     onComputeBurnProbability({
       ignition_lat: ignitionPoint.lat,
@@ -182,6 +184,17 @@ export default function WeatherPanel({
 
   const handleSubmit = () => {
     if (!ignitionPoint || hasErrors) return;
+    onRunParams?.({
+      weather,
+      fwi,
+      isi: liveISI,
+      bui: liveBUI,
+      fwi_value: liveFWI,
+      danger_rating: liveDanger,
+      n_iterations: 1,
+      duration_hours: durationHours,
+      fuel_type: fuelType,
+    });
     onStartSimulation({
       ignition_lat: ignitionPoint.lat,
       ignition_lng: ignitionPoint.lng,

@@ -745,3 +745,150 @@ select {
     min-height: 300px;
   }
 }
+
+/* ── EOC Summary Panel ─────────────────────────────────────────────────── */
+
+.eoc-panel {
+  border-top: 2px solid var(--fire-orange);
+}
+
+.eoc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.eoc-header h3 {
+  color: var(--fire-orange);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.eoc-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.eoc-section {
+  margin-bottom: 12px;
+}
+
+.eoc-section h4 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--border);
+}
+
+.eoc-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  align-items: baseline;
+}
+
+.eoc-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.eoc-value {
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text-primary);
+}
+
+.eoc-highlight {
+  color: var(--fire-orange);
+  font-weight: 600;
+}
+
+.eoc-sublabel {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.eoc-fuel {
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.eoc-coords {
+  font-size: 11px;
+}
+
+.eoc-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  font-family: inherit;
+  vertical-align: middle;
+}
+
+/* Burn probability threshold table */
+.eoc-bp-table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.eoc-bp-row {
+  display: table-row;
+}
+
+.eoc-bp-row > span {
+  display: table-cell;
+  padding: 2px 4px;
+}
+
+.eoc-bp-header {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.eoc-bp-label {
+  font-weight: 600;
+}
+
+.eoc-bp-val {
+  font-family: monospace;
+  text-align: right;
+}
+
+/* Print styles: show only the EOC summary */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #eoc-summary,
+  #eoc-summary * {
+    visibility: visible;
+  }
+  #eoc-summary {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background: white;
+    color: black;
+    padding: 20px;
+    font-size: 14px;
+  }
+  .eoc-header h3 { color: black; }
+  .eoc-section h4 { color: #333; }
+  .eoc-label { color: #666; }
+  .eoc-value { color: black; }
+  .eoc-actions { display: none; }
+}
