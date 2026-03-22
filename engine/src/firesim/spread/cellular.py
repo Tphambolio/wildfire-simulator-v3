@@ -22,7 +22,7 @@ from firesim.spread.ellipse import (
     calculate_flank_ros,
     calculate_length_to_breadth_ratio,
 )
-from firesim.spread.huygens import FuelGrid, SpreadConditions, SpreadModifierGrid
+from firesim.spread.huygens import FuelGrid, SpreadConditions, SpreadModifierGrid, TerrainGrid
 from firesim.spread.slope import calculate_directional_slope_factor
 
 logger = logging.getLogger(__name__)
@@ -74,6 +74,7 @@ def run_cellular_simulation(
     conditions: SpreadConditions,
     default_fuel: FuelType = FuelType.C2,
     spread_modifier_grid: SpreadModifierGrid | None = None,
+    terrain_grid: TerrainGrid | None = None,
     dt_minutes: float = 1.0,
     snapshot_interval_minutes: float = 30.0,
 ) -> list[CellularFrame]:
@@ -85,6 +86,9 @@ def run_cellular_simulation(
         conditions: Weather/FWI conditions.
         default_fuel: Fallback fuel type.
         spread_modifier_grid: Optional WUI modifiers.
+        terrain_grid: Optional slope/aspect grid for directional slope correction
+            (CFFDRS ST-X-3). When provided, spread probability to each 8-neighbor
+            is scaled by the directional slope factor.
         dt_minutes: Timestep in minutes.
         snapshot_interval_minutes: How often to yield frames.
 
@@ -212,16 +216,23 @@ def run_cellular_simulation(
 
             # Apply WUI modifiers
             ros_mod = 1.0
+            cell_center_lat = lat_max - (row + 0.5) * cell_lat
+            cell_center_lng = lng_min + (col + 0.5) * cell_lng
             if spread_modifier_grid is not None:
                 rm, im, _ = spread_modifier_grid.get_modifiers_at(
-                    lat_max - (row + 0.5) * cell_lat,
-                    lng_min + (col + 0.5) * cell_lng,
+                    cell_center_lat, cell_center_lng,
                 )
                 ros_base *= rm
                 fi *= im
 
             if ros_base <= 0.001:
                 continue
+
+            # Terrain: look up slope/aspect once per burning cell
+            if terrain_grid is not None:
+                slope_pct, aspect_deg = terrain_grid.get_slope_aspect(cell_center_lat, cell_center_lng)
+            else:
+                slope_pct, aspect_deg = 0.0, 0.0
 
             # Store intensity and set burn duration for this cell
             intensity_map[row, col] = fi
@@ -245,9 +256,16 @@ def run_cellular_simulation(
                 if neighbor_fuel is None:
                     continue  # Non-fuel — fire wraps around
 
+                # Apply directional slope factor (ST-X-3 §3.3)
+                if slope_pct > 1.0:
+                    sf = calculate_directional_slope_factor(slope_pct, aspect_deg, angle)
+                    ros_spread = ros_base * sf
+                else:
+                    ros_spread = ros_base
+
                 # Elliptical spread probability
                 spread_prob = _elliptical_spread_prob(
-                    angle, spread_dir, ros_base, lbr, cell_size_m, dt_minutes,
+                    angle, spread_dir, ros_spread, lbr, cell_size_m, dt_minutes,
                 )
 
                 # Heat accumulation for failed ignitions

@@ -1,6 +1,6 @@
 /** API client for the FireSim backend. */
 
-import type { SimulationCreate, SimulationResponse, CurrentWeather, FWIResult, BurnProbabilityRequest, BurnProbabilityResponse } from "../types/simulation";
+import type { SimulationCreate, MultiDaySimulationCreate, SimulationResponse, CurrentWeather, FWIResult, BurnProbabilityRequest, BurnProbabilityResponse } from "../types/simulation";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -15,6 +15,21 @@ export async function createSimulation(
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: resp.statusText }));
     throw new Error(err.detail || "Failed to create simulation");
+  }
+  return resp.json();
+}
+
+export async function createMultiDaySimulation(
+  params: MultiDaySimulationCreate
+): Promise<SimulationResponse> {
+  const resp = await fetch(`${API_BASE}/api/v1/simulations/multiday`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+    throw new Error(err.detail || "Failed to start multi-day simulation");
   }
   return resp.json();
 }

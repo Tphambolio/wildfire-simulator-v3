@@ -70,6 +70,7 @@ def run_monte_carlo(
     fuel_grid: FuelGrid,
     base_conditions: SpreadConditions,
     spread_modifier_grid: SpreadModifierGrid | None = None,
+    terrain_grid=None,
     dt_minutes: float = 2.0,
 ) -> BurnProbabilityResult:
     """Run Monte Carlo burn probability analysis.
@@ -79,6 +80,7 @@ def run_monte_carlo(
         fuel_grid: Spatial fuel grid for all iterations.
         base_conditions: Baseline weather/FWI (varied per iteration).
         spread_modifier_grid: Optional WUI spread modifiers.
+        terrain_grid: Optional TerrainGrid for slope-adjusted spread (ST-X-3).
         dt_minutes: CA timestep (smaller = more accurate, slower).
 
     Returns:
@@ -149,6 +151,7 @@ def run_monte_carlo(
                 fuel_grid=fuel_grid,
                 conditions=iter_conditions,
                 spread_modifier_grid=spread_modifier_grid,
+                terrain_grid=terrain_grid,
                 dt_minutes=dt_minutes,
                 snapshot_interval_minutes=mc_config.duration_hours * 60.0,  # final only
             )

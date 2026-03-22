@@ -1046,6 +1046,168 @@ select {
   margin-top: 4px;
 }
 
+/* ── Simulation mode tabs (Single / Multi-day) ───────────────────────────── */
+
+.sim-mode-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #2a3a5a;
+  padding-bottom: 8px;
+}
+
+.sim-mode-tab {
+  flex: 1;
+  padding: 5px 8px;
+  background: #1e2a40;
+  border: 1px solid #2a3a5a;
+  border-radius: 4px;
+  color: #88a0c0;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sim-mode-tab.active {
+  background: #1a3060;
+  border-color: #3a70c0;
+  color: #e0eaff;
+  font-weight: 600;
+}
+
+.sim-mode-tab:hover:not(.active) {
+  background: #222e46;
+  color: #aac0dd;
+}
+
+/* ── Multi-day weather entry panel ──────────────────────────────────────── */
+
+.md-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.md-panel-note {
+  font-size: 11px;
+  color: #667;
+  line-height: 1.4;
+  margin-bottom: 2px;
+}
+
+.md-day {
+  background: #1a2030;
+  border: 1px solid #2a3a5a;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.md-day-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.md-day-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #88a0c0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.md-day-remove {
+  background: none;
+  border: none;
+  color: #667;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.md-day-remove:hover { color: #e57373; }
+
+.md-grid {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.md-label {
+  font-size: 11px;
+  color: #667;
+  text-align: right;
+}
+
+.md-input {
+  background: #1e2a40;
+  border: 1px solid #2a3a5a;
+  border-radius: 3px;
+  color: #e0eaff;
+  font-size: 12px;
+  padding: 3px 6px;
+}
+
+.md-wind-row {
+  display: flex;
+  gap: 6px;
+}
+
+.md-add-btn {
+  width: 100%;
+  padding: 6px;
+  background: #1a2030;
+  border: 1px dashed #2a3a5a;
+  border-radius: 4px;
+  color: #667;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.md-add-btn:hover {
+  background: #1a3060;
+  color: #88a0c0;
+  border-color: #3a60a0;
+}
+
+/* ── TimeSlider: range wrapper + day-boundary ticks ─────────────────────── */
+.ts-range-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ts-range-wrap .ts-range {
+  width: 100%;
+}
+
+.ts-day-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(255, 107, 53, 0.6);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.ts-day-tick-label {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 /* Print styles: show only the EOC summary */
 @media print {
   body * {

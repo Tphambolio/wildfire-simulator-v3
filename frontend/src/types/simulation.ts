@@ -26,6 +26,7 @@ export interface SimulationCreate {
   water_path?: string | null;
   buildings_path?: string | null;
   wui_zones_path?: string | null;
+  dem_path?: string | null;
   use_ca_mode?: boolean;
 }
 
@@ -41,6 +42,29 @@ export interface SimulationFrame {
   spot_fires?: Array<{ lat: number; lng: number; distance_m: number; hfi_kw_m: number }> | null;
   num_fronts?: number;
   burned_cells?: Array<{ lat: number; lng: number; intensity: number; fuel: string }> | null;
+  day?: number | null; // Multi-day scenario: which day (1-based)
+}
+
+export interface MultiDayWeatherParams {
+  wind_speed: number;
+  wind_direction: number;
+  temperature: number;
+  relative_humidity: number;
+  precipitation_24h: number;
+}
+
+export interface MultiDaySimulationCreate {
+  ignition_lat: number;
+  ignition_lng: number;
+  days: MultiDayWeatherParams[];
+  fwi_overrides?: FWIOverrides;
+  month?: number;
+  snapshot_interval_minutes?: number;
+  fuel_type?: string;
+  fuel_grid_path?: string | null;
+  water_path?: string | null;
+  buildings_path?: string | null;
+  dem_path?: string | null;
 }
 
 export type SimulationStatus = "pending" | "running" | "paused" | "completed" | "cancelled" | "failed";
@@ -85,6 +109,7 @@ export interface BurnProbabilityRequest {
   fuel_grid_path?: string | null;
   water_path?: string | null;
   buildings_path?: string | null;
+  dem_path?: string | null;
 }
 
 export interface BurnProbabilityResponse {

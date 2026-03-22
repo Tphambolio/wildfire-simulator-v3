@@ -1,9 +1,10 @@
 /** Hook for managing simulation state and WebSocket streaming. */
 
 import { useCallback, useRef, useState } from "react";
-import { createSimulation, getSimulation, getWebSocketUrl } from "../services/api";
+import { createSimulation, createMultiDaySimulation, getSimulation, getWebSocketUrl } from "../services/api";
 import type {
   SimulationCreate,
+  MultiDaySimulationCreate,
   SimulationFrame,
   SimulationStatus,
   WSEvent,
@@ -32,7 +33,9 @@ export function useSimulation() {
 
   const wsRef = useRef<WebSocket | null>(null);
 
-  const startSimulation = useCallback(async (params: SimulationCreate) => {
+  const _startWithCreateFn = useCallback(async (
+    createFn: () => Promise<{ simulation_id: string }>
+  ) => {
     // Close existing WebSocket
     if (wsRef.current) {
       wsRef.current.close();
@@ -50,7 +53,7 @@ export function useSimulation() {
     });
 
     try {
-      const resp = await createSimulation(params);
+      const resp = await createFn();
       const simId = resp.simulation_id;
 
       setState((prev) => ({ ...prev, simulationId: simId }));
@@ -128,6 +131,16 @@ export function useSimulation() {
     }
   }, []);
 
+  const startSimulation = useCallback(
+    (params: SimulationCreate) => _startWithCreateFn(() => createSimulation(params)),
+    [_startWithCreateFn]
+  );
+
+  const startMultiDaySimulation = useCallback(
+    (params: MultiDaySimulationCreate) => _startWithCreateFn(() => createMultiDaySimulation(params)),
+    [_startWithCreateFn]
+  );
+
   const pollForResults = useCallback(async (simId: string) => {
     const poll = async () => {
       try {
@@ -182,6 +195,7 @@ export function useSimulation() {
     ...state,
     currentFrame,
     startSimulation,
+    startMultiDaySimulation,
     setFrameIndex,
     pauseSimulation,
     resumeSimulation,

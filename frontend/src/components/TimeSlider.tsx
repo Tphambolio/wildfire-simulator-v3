@@ -80,6 +80,15 @@ export default function TimeSlider({
     onIndexChange(Math.min(frames.length - 1, currentIndex + 1));
   };
 
+  // Day boundary markers for multi-day scenarios
+  const maxHours = totalFrame?.time_hours ?? 0;
+  const dayBoundaries: number[] = [];
+  if (maxHours > 24) {
+    for (let d = 24; d < maxHours; d += 24) {
+      dayBoundaries.push(d);
+    }
+  }
+
   return (
     <div className="time-slider">
       {/* Step back */}
@@ -111,25 +120,42 @@ export default function TimeSlider({
         &#9654;
       </button>
 
-      {/* Elapsed time */}
+      {/* Elapsed time — show Day label when multi-day */}
       <span className="time-label ts-current" title="Elapsed simulation time">
-        T+{currentFrame?.time_hours.toFixed(1) ?? "0"}h
+        {maxHours > 24 && currentFrame?.day
+          ? `D${currentFrame.day} T+${(currentFrame.time_hours - (currentFrame.day - 1) * 24).toFixed(0)}h`
+          : `T+${currentFrame?.time_hours.toFixed(1) ?? "0"}h`}
       </span>
 
-      {/* Scrubber */}
-      <input
-        type="range"
-        min={0}
-        max={frames.length - 1}
-        value={currentIndex}
-        onChange={(e) => {
-          setIsPlaying(false);
-          onIndexChange(Number(e.target.value));
-        }}
-        className="ts-range"
-        style={{ "--pct": `${pct}%` } as React.CSSProperties}
-        title={`Frame ${currentIndex + 1} of ${frames.length}`}
-      />
+      {/* Scrubber with optional day-boundary tick marks */}
+      <div className="ts-range-wrap">
+        <input
+          type="range"
+          min={0}
+          max={frames.length - 1}
+          value={currentIndex}
+          onChange={(e) => {
+            setIsPlaying(false);
+            onIndexChange(Number(e.target.value));
+          }}
+          className="ts-range"
+          style={{ "--pct": `${pct}%` } as React.CSSProperties}
+          title={`Frame ${currentIndex + 1} of ${frames.length}`}
+        />
+        {dayBoundaries.map((d) => {
+          const tickPct = (d / maxHours) * 100;
+          return (
+            <div
+              key={d}
+              className="ts-day-tick"
+              style={{ left: `${tickPct}%` }}
+              title={`Day ${d / 24 + 1} starts`}
+            >
+              <span className="ts-day-tick-label">D{d / 24 + 1}</span>
+            </div>
+          );
+        })}
+      </div>
 
       {/* Total duration */}
       <span className="time-label" title="Total simulation duration">

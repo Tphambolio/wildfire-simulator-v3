@@ -1,9 +1,10 @@
 /** Weather and simulation parameter controls. */
 
 import { useMemo, useState } from "react";
-import type { SimulationCreate, WeatherParams, FWIOverrides, BurnProbabilityRequest } from "../types/simulation";
+import type { SimulationCreate, MultiDaySimulationCreate, MultiDayWeatherParams, WeatherParams, FWIOverrides, BurnProbabilityRequest } from "../types/simulation";
 import { FUEL_TYPES } from "../types/simulation";
 import { fetchCurrentWeather, calculateFWI } from "../services/api";
+import MultiDayPanel from "./MultiDayPanel";
 
 // ── Client-side CFFDRS FWI computation (Forestry Canada 1992, ST-X-3) ──────────
 function computeISI(ffmc: number, windSpeedKmh: number): number {
@@ -87,6 +88,7 @@ export interface RunParams {
 
 interface WeatherPanelProps {
   onStartSimulation: (params: SimulationCreate) => void;
+  onStartMultiDaySimulation?: (params: MultiDaySimulationCreate) => void;
   onComputeBurnProbability?: (params: BurnProbabilityRequest) => void;
   onRunParams?: (params: RunParams) => void;
   ignitionPoint: { lat: number; lng: number } | null;
@@ -96,6 +98,7 @@ interface WeatherPanelProps {
 
 export default function WeatherPanel({
   onStartSimulation,
+  onStartMultiDaySimulation,
   onComputeBurnProbability,
   onRunParams,
   ignitionPoint,
@@ -120,6 +123,7 @@ export default function WeatherPanel({
   const [includeWater, setIncludeWater] = useState(true);
   const [includeBuildings, setIncludeBuildings] = useState(true);
   const [includeWUI, setIncludeWUI] = useState(true);
+  const [includeDEM, setIncludeDEM] = useState(true);
   const [durationHours, setDurationHours] = useState(4);
   const [snapshotMinutes, setSnapshotMinutes] = useState(30);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -127,6 +131,12 @@ export default function WeatherPanel({
   const [weatherMessage, setWeatherMessage] = useState<string | null>(null);
   const [fwiLoading, setFwiLoading] = useState(false);
   const [mcIterations, setMcIterations] = useState(50);
+  const [simMode, setSimMode] = useState<"single" | "multiday">("single");
+  const [multiDayDays, setMultiDayDays] = useState<MultiDayWeatherParams[]>([
+    { wind_speed: 20, wind_direction: 270, temperature: 25, relative_humidity: 30, precipitation_24h: 0 },
+    { wind_speed: 25, wind_direction: 270, temperature: 28, relative_humidity: 25, precipitation_24h: 0 },
+    { wind_speed: 30, wind_direction: 260, temperature: 30, relative_humidity: 20, precipitation_24h: 0 },
+  ]);
 
   // ── Live ISI / BUI / FWI (reactive to slider changes) ────────────────────
   const liveISI = useMemo(
@@ -155,6 +165,8 @@ export default function WeatherPanel({
     "/home/rpas/dev/wildfire/wildfire-self-learning/data/edmonton_buildings.geojson.gz";
   const EDMONTON_WUI_PATH =
     "/home/rpas/dev/wildfire/wildfire-self-learning/data/wui_zones.geojson.gz";
+  const EDMONTON_DEM_PATH =
+    "/home/rpas/dev/wildfire/wildfire-self-learning/data/elevation/edmonton_dem.tif";
 
   const handleMonteCarlo = () => {
     if (!ignitionPoint || !onComputeBurnProbability || hasErrors) return;
@@ -179,6 +191,7 @@ export default function WeatherPanel({
       fuel_grid_path: useEdmontonGrid ? EDMONTON_FUEL_GRID_PATH : null,
       water_path: useEdmontonGrid && includeWater ? EDMONTON_WATER_PATH : null,
       buildings_path: useEdmontonGrid && includeBuildings ? EDMONTON_BUILDINGS_PATH : null,
+      dem_path: useEdmontonGrid && includeDEM ? EDMONTON_DEM_PATH : null,
     });
   };
 
@@ -207,7 +220,25 @@ export default function WeatherPanel({
       water_path: useEdmontonGrid && includeWater ? EDMONTON_WATER_PATH : null,
       buildings_path: useEdmontonGrid && includeBuildings ? EDMONTON_BUILDINGS_PATH : null,
       wui_zones_path: useEdmontonGrid && includeWUI ? EDMONTON_WUI_PATH : null,
+      dem_path: useEdmontonGrid && includeDEM ? EDMONTON_DEM_PATH : null,
       use_ca_mode: useSyntheticCA && !useEdmontonGrid,
+    });
+  };
+
+  const handleMultiDaySubmit = () => {
+    if (!ignitionPoint || !onStartMultiDaySimulation) return;
+    onStartMultiDaySimulation({
+      ignition_lat: ignitionPoint.lat,
+      ignition_lng: ignitionPoint.lng,
+      days: multiDayDays,
+      fwi_overrides: fwi,
+      month: new Date().getMonth() + 1,
+      snapshot_interval_minutes: snapshotMinutes,
+      fuel_type: fuelType,
+      fuel_grid_path: useEdmontonGrid ? EDMONTON_FUEL_GRID_PATH : null,
+      water_path: useEdmontonGrid && includeWater ? EDMONTON_WATER_PATH : null,
+      buildings_path: useEdmontonGrid && includeBuildings ? EDMONTON_BUILDINGS_PATH : null,
+      dem_path: useEdmontonGrid && includeDEM ? EDMONTON_DEM_PATH : null,
     });
   };
 
@@ -274,6 +305,24 @@ export default function WeatherPanel({
     <div className="panel weather-panel">
       <h3>Simulation Parameters</h3>
 
+      {/* Mode toggle: single-event vs multi-day */}
+      {onStartMultiDaySimulation && (
+        <div className="sim-mode-tabs">
+          <button
+            className={`sim-mode-tab${simMode === "single" ? " active" : ""}`}
+            onClick={() => setSimMode("single")}
+          >
+            Single Event
+          </button>
+          <button
+            className={`sim-mode-tab${simMode === "multiday" ? " active" : ""}`}
+            onClick={() => setSimMode("multiday")}
+          >
+            Multi-day
+          </button>
+        </div>
+      )}
+
       {!ignitionPoint && (
         <div className="hint">Click the map to set ignition point</div>
       )}
@@ -283,6 +332,8 @@ export default function WeatherPanel({
           Ignition: {ignitionPoint.lat.toFixed(4)}, {ignitionPoint.lng.toFixed(4)}
         </div>
       )}
+
+      {simMode === "single" && (<>
 
       <div className="section">
         <h4>Weather</h4>
@@ -428,6 +479,14 @@ export default function WeatherPanel({
                 onChange={(e) => setIncludeWUI(e.target.checked)}
               />
               WUI zone modifiers (425 zones)
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px", paddingLeft: "20px" }}>
+              <input
+                type="checkbox"
+                checked={includeDEM}
+                onChange={(e) => setIncludeDEM(e.target.checked)}
+              />
+              Terrain slope (DEM — ISF/RSF correction)
             </label>
             <div className="hint" style={{ fontSize: "0.85em", opacity: 0.7 }}>
               Spatial fuel types: D2, O1a, O1b, S2, C1. Fallback: {fuelType}
@@ -577,14 +636,38 @@ export default function WeatherPanel({
         </div>
       )}
 
-      <button
-        className="btn-primary"
-        onClick={handleSubmit}
-        disabled={!ignitionPoint || isRunning || hasErrors}
-        title={hasErrors ? "Fix validation errors before running" : undefined}
-      >
-        {isRunning ? "Simulating..." : "Run Simulation"}
-      </button>
+      </>)}
+
+      {/* Multi-day scenario panel */}
+      {simMode === "multiday" && (
+        <>
+          <MultiDayPanel
+            days={multiDayDays}
+            onChange={setMultiDayDays}
+            disabled={isRunning}
+          />
+          <button
+            className="btn-primary"
+            onClick={handleMultiDaySubmit}
+            disabled={!ignitionPoint || isRunning || !onStartMultiDaySimulation}
+            title={!ignitionPoint ? "Set ignition point first" : undefined}
+          >
+            {isRunning ? "Simulating..." : `Run ${multiDayDays.length * 24}h Scenario`}
+          </button>
+        </>
+      )}
+
+      {/* Single-event run button */}
+      {simMode === "single" && (
+        <button
+          className="btn-primary"
+          onClick={handleSubmit}
+          disabled={!ignitionPoint || isRunning || hasErrors}
+          title={hasErrors ? "Fix validation errors before running" : undefined}
+        >
+          {isRunning ? "Simulating..." : "Run Simulation"}
+        </button>
+      )}
 
       {onComputeBurnProbability && (
         <div style={{ marginTop: 12, borderTop: "1px solid #2a3a5a", paddingTop: 12 }}>

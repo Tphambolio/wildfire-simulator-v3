@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from firesim_api.schemas.simulation import (
     BurnProbabilityRequest,
     BurnProbabilityResponse,
+    MultiDaySimulationCreate,
     SimulationCreate,
     SimulationFrame as FrameSchema,
     SimulationResponse,
@@ -29,7 +30,7 @@ runner: SimulationRunner | None = None
 ws_manager: ConnectionManager | None = None
 
 
-def _frame_to_schema(frame: SimulationFrame) -> FrameSchema:
+def _frame_to_schema(frame: SimulationFrame, day: int | None = None) -> FrameSchema:
     """Convert engine SimulationFrame to API schema."""
     return FrameSchema(
         time_hours=frame.time_hours,
@@ -43,6 +44,7 @@ def _frame_to_schema(frame: SimulationFrame) -> FrameSchema:
         spot_fires=frame.spot_fires,
         num_fronts=frame.num_fronts,
         burned_cells=frame.burned_cells,
+        day=day,
     )
 
 
@@ -54,6 +56,18 @@ def _on_frame(sim_id: str, frame: SimulationFrame) -> None:
         "type": "simulation.frame",
         "simulation_id": sim_id,
         "frame": _frame_to_schema(frame).model_dump(),
+    }
+    ws_manager.broadcast_from_thread(sim_id, event)
+
+
+def _on_multiday_frame(sim_id: str, frame: SimulationFrame, day: int) -> None:
+    """Callback from multi-day simulation thread — broadcast frame with day tag."""
+    if ws_manager is None:
+        return
+    event = {
+        "type": "simulation.frame",
+        "simulation_id": sim_id,
+        "frame": _frame_to_schema(frame, day=day).model_dump(),
     }
     ws_manager.broadcast_from_thread(sim_id, event)
 
@@ -85,10 +99,13 @@ async def get_simulation(sim_id: str) -> SimulationResponse:
 
     frames = [_frame_to_schema(f) for f in run.get_frames()]
 
+    # Only include config in response for single-day simulations
+    config_out = run.config if isinstance(run.config, SimulationCreate) else None
+
     return SimulationResponse(
         simulation_id=run.id,
         status=run.status,
-        config=run.config,
+        config=config_out,
         frames=frames,
         error=run.error,
     )
@@ -174,6 +191,33 @@ async def simulation_websocket(websocket: WebSocket, sim_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Multi-day scenario
+# ---------------------------------------------------------------------------
+
+
+@router.post("/multiday", response_model=SimulationResponse)
+async def create_multiday_simulation(params: MultiDaySimulationCreate) -> SimulationResponse:
+    """Start a multi-day fire scenario (24h/48h/72h).
+
+    Chains one 24-hour Huygens spread simulation per day. FWI moisture codes
+    (FFMC/DMC/DC) carry forward between days using CFFDRS daily equations.
+    The fire perimeter from the end of each day seeds the next day's front.
+
+    Returns a simulation_id immediately; connect to /ws/{sim_id} for streaming.
+    """
+    if runner is None:
+        raise HTTPException(status_code=500, detail="Runner not initialized")
+
+    sim_id = runner.create_multiday(params, on_frame=_on_multiday_frame)
+
+    return SimulationResponse(
+        simulation_id=sim_id,
+        status=SimulationStatus.RUNNING,
+        config=None,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Monte Carlo burn probability
 # ---------------------------------------------------------------------------
 
@@ -232,6 +276,24 @@ async def compute_burn_probability(params: BurnProbabilityRequest) -> BurnProbab
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to load fuel grid: {exc}") from exc
 
+    # Load terrain grid for slope-adjusted spread (optional)
+    terrain_grid = None
+    dem_path = params.dem_path or settings.dem_path
+    if dem_path:
+        if not os.path.exists(dem_path):
+            raise HTTPException(status_code=422, detail=f"DEM file not found: {dem_path!r}")
+        try:
+            from firesim.data.dem_loader import load_terrain_grid
+            terrain_grid = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: load_terrain_grid(dem_path)
+            )
+            logger.info(
+                "Burn probability DEM loaded: %dx%d terrain grid",
+                terrain_grid.rows, terrain_grid.cols,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to load DEM: {exc}") from exc
+
     fwi = params.fwi_overrides
     conditions = SpreadConditions(
         wind_speed=params.weather.wind_speed,
@@ -255,7 +317,7 @@ async def compute_burn_probability(params: BurnProbabilityRequest) -> BurnProbab
     # Run Monte Carlo in a thread (CPU-bound)
     result: BurnProbabilityResult = await asyncio.get_event_loop().run_in_executor(
         None,
-        lambda: run_monte_carlo(mc_config, fuel_grid, conditions),
+        lambda: run_monte_carlo(mc_config, fuel_grid, conditions, terrain_grid=terrain_grid),
     )
 
     return BurnProbabilityResponse(

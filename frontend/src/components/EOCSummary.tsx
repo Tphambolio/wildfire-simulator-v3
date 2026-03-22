@@ -213,6 +213,37 @@ function intensityClass(hfi: number): { label: string; color: string } {
   return { label: "Ultra-Extreme", color: "#b71c1c" };
 }
 
+// ── Per-day stats (multi-day scenarios) ─────────────────────────────────────
+
+interface DayStats {
+  day: number;
+  peakRos: number;
+  peakHfi: number;
+  finalAreaHa: number;
+  fireType: string;
+}
+
+function extractDayStats(frames: SimulationFrame[]): DayStats[] | null {
+  if (frames.length === 0) return null;
+  const maxTime = frames[frames.length - 1].time_hours;
+  if (maxTime <= 24) return null; // Single-day — no breakdown needed
+
+  const dayMap = new Map<number, DayStats>();
+  for (const f of frames) {
+    const day = f.day ?? (Math.ceil(f.time_hours / 24) || 1);
+    const existing = dayMap.get(day);
+    if (!existing) {
+      dayMap.set(day, { day, peakRos: f.head_ros_m_min, peakHfi: f.max_hfi_kw_m, finalAreaHa: f.area_ha, fireType: f.fire_type });
+    } else {
+      if (f.head_ros_m_min > existing.peakRos) existing.peakRos = f.head_ros_m_min;
+      if (f.max_hfi_kw_m > existing.peakHfi) existing.peakHfi = f.max_hfi_kw_m;
+      existing.finalAreaHa = f.area_ha;
+      existing.fireType = f.fire_type;
+    }
+  }
+  return Array.from(dayMap.values()).sort((a, b) => a.day - b.day);
+}
+
 export default function EOCSummary({
   frames,
   burnProbData,
@@ -223,6 +254,7 @@ export default function EOCSummary({
 }: EOCSummaryProps) {
   const spread = extractSpreadStats(frames);
   const burnArea = burnProbData ? extractBurnAreaStats(burnProbData) : null;
+  const dayStats = extractDayStats(frames);
 
   if (!spread && !burnArea && !runParams) return null;
 
@@ -302,6 +334,32 @@ export default function EOCSummary({
                 </span>
               </>
             )}
+          </div>
+        </section>
+      )}
+
+      {/* Per-day stats (multi-day scenarios only) */}
+      {dayStats && (
+        <section className="eoc-section">
+          <h4>Per-Day Progression</h4>
+          <div className="eoc-bp-table">
+            <div className="eoc-bp-row eoc-bp-header">
+              <span>Day</span>
+              <span>Area (ha)</span>
+              <span>Peak HFI</span>
+            </div>
+            {dayStats.map(({ day, finalAreaHa, peakHfi }) => {
+              const intClass = intensityClass(peakHfi);
+              return (
+                <div className="eoc-bp-row" key={day}>
+                  <span className="eoc-bp-label">Day {day}</span>
+                  <span className="eoc-bp-val">{finalAreaHa.toFixed(0)}</span>
+                  <span className="eoc-bp-val" style={{ color: intClass.color }}>
+                    {peakHfi.toFixed(0)}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </section>
       )}

@@ -17,6 +17,7 @@ from firesim.spread.simulator import Simulator
 from firesim.types import SimulationConfig, SimulationFrame, WeatherInput
 
 from firesim_api.schemas.simulation import (
+    MultiDaySimulationCreate,
     SimulationCreate,
     SimulationStatus,
 )
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 class SimulationRun:
     """Tracks state of a single simulation run."""
 
-    def __init__(self, sim_id: str, config: SimulationCreate):
+    def __init__(self, sim_id: str, config: SimulationCreate | MultiDaySimulationCreate | None):
         self.id = sim_id
         self.config = config
         self.status: SimulationStatus = SimulationStatus.PENDING
@@ -330,3 +331,177 @@ class SimulationRunner:
             run.status = SimulationStatus.FAILED
             run.error = str(e)
             logger.exception("Simulation %s failed: %s", run.id, e)
+
+    # ── Multi-day scenario ──────────────────────────────────────────────────
+
+    def create_multiday(
+        self,
+        params: MultiDaySimulationCreate,
+        on_frame: Callable[[str, SimulationFrame, int], None] | None = None,
+    ) -> str:
+        """Create and start a multi-day fire scenario.
+
+        Chains one 24-hour Huygens simulation per day. The FWI system
+        carries moisture codes (FFMC/DMC/DC) forward between days using
+        CFFDRS daily equations. The final fire front from each day is used
+        as the starting front for the next day.
+
+        Args:
+            params: Multi-day simulation parameters.
+            on_frame: Callback (sim_id, frame, day_number) for each frame.
+
+        Returns:
+            Simulation ID.
+        """
+        sim_id = str(uuid.uuid4())[:8]
+        run = SimulationRun(sim_id, params)
+
+        with self._lock:
+            self._runs[sim_id] = run
+
+        thread = threading.Thread(
+            target=self._execute_multiday,
+            args=(run, params, on_frame),
+            daemon=True,
+        )
+        thread.start()
+
+        return sim_id
+
+    def _execute_multiday(
+        self,
+        run: SimulationRun,
+        params: MultiDaySimulationCreate,
+        on_frame: Callable[[str, SimulationFrame, int], None] | None,
+    ) -> None:
+        """Execute a multi-day scenario, chaining per-day Huygens simulations."""
+        import dataclasses
+
+        from firesim.fwi.calculator import FWICalculator
+        from firesim.spread.huygens import FireVertex
+
+        run.status = SimulationStatus.RUNNING
+
+        try:
+            try:
+                fuel_type = FuelType(params.fuel_type)
+            except ValueError:
+                fuel_type = FuelType.C2
+
+            from firesim_api.settings import settings
+
+            dem_path = getattr(params, "dem_path", None) or settings.dem_path
+            fuel_grid, spread_modifier_grid, terrain_grid = self._load_grids(
+                params.fuel_grid_path,
+                params.water_path,
+                params.buildings_path,
+                None,  # no WUI for multiday
+                dem_path,
+            )
+
+            # Initialise FWI carry-in state from user overrides or spring defaults
+            fwi_ov = params.fwi_overrides
+            ffmc_prev = fwi_ov.ffmc if fwi_ov and fwi_ov.ffmc is not None else 85.0
+            dmc_prev = fwi_ov.dmc if fwi_ov and fwi_ov.dmc is not None else 6.0
+            dc_prev = fwi_ov.dc if fwi_ov and fwi_ov.dc is not None else 15.0
+
+            fwi_calc = FWICalculator(
+                ffmc_prev=ffmc_prev,
+                dmc_prev=dmc_prev,
+                dc_prev=dc_prev,
+            )
+
+            initial_front: list[FireVertex] | None = None
+            time_offset = 0.0  # cumulative hours added to frame timestamps
+
+            for day_idx, day_weather in enumerate(params.days):
+                day_num = day_idx + 1
+
+                # Advance FWI state using today's weather (CFFDRS daily equations)
+                day_fwi = fwi_calc.calculate_daily(
+                    temp=day_weather.temperature,
+                    rh=day_weather.relative_humidity,
+                    wind=day_weather.wind_speed,
+                    rain=day_weather.precipitation_24h,
+                    month=params.month,
+                )
+
+                config = SimulationConfig(
+                    ignition_lat=params.ignition_lat,
+                    ignition_lng=params.ignition_lng,
+                    weather=WeatherInput(
+                        temperature=day_weather.temperature,
+                        relative_humidity=day_weather.relative_humidity,
+                        wind_speed=day_weather.wind_speed,
+                        wind_direction=day_weather.wind_direction,
+                        precipitation_24h=day_weather.precipitation_24h,
+                    ),
+                    duration_hours=24.0,
+                    snapshot_interval_minutes=params.snapshot_interval_minutes,
+                    ffmc=day_fwi.ffmc,
+                    dmc=day_fwi.dmc,
+                    dc=day_fwi.dc,
+                )
+
+                simulator = Simulator(
+                    config,
+                    fuel_grid=fuel_grid,
+                    terrain_grid=terrain_grid,
+                    default_fuel=fuel_type,
+                    spread_modifier_grid=spread_modifier_grid,
+                    initial_front=initial_front,
+                )
+
+                last_frame: SimulationFrame | None = None
+
+                for frame in simulator.run():
+                    # Skip the t=0 frame on day 2+ (duplicates end of previous day)
+                    if day_idx > 0 and frame.time_hours == 0.0:
+                        last_frame = frame
+                        continue
+
+                    adjusted = dataclasses.replace(
+                        frame, time_hours=round(frame.time_hours + time_offset, 3)
+                    )
+
+                    run.add_frame(adjusted)
+                    if on_frame is not None:
+                        on_frame(run.id, adjusted, day_num)
+
+                    run._pause_event.wait()
+                    if run._cancel_event.is_set():
+                        break
+
+                    last_frame = frame
+
+                if run._cancel_event.is_set():
+                    break
+
+                # Carry fire front forward to next day
+                if last_frame is not None and len(last_frame.perimeter) >= 3:
+                    initial_front = [
+                        FireVertex(lat=lat, lng=lng) for lat, lng in last_frame.perimeter
+                    ]
+                else:
+                    initial_front = None
+
+                time_offset += 24.0
+                logger.info(
+                    "Multi-day sim %s — Day %d complete. FWI: FFMC=%.1f DMC=%.1f DC=%.1f FWI=%.1f",
+                    run.id, day_num,
+                    day_fwi.ffmc, day_fwi.dmc, day_fwi.dc, day_fwi.fwi,
+                )
+
+            if not run._cancel_event.is_set():
+                run.status = SimulationStatus.COMPLETED
+                logger.info(
+                    "Multi-day simulation %s completed: %d frames across %d days",
+                    run.id, len(run.frames), len(params.days),
+                )
+            else:
+                logger.info("Multi-day simulation %s cancelled", run.id)
+
+        except Exception as e:
+            run.status = SimulationStatus.FAILED
+            run.error = str(e)
+            logger.exception("Multi-day simulation %s failed: %s", run.id, e)

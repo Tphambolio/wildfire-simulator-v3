@@ -260,6 +260,7 @@ export default function App() {
     isRunning,
     isPaused,
     startSimulation,
+    startMultiDaySimulation,
     setFrameIndex,
     pauseSimulation,
     resumeSimulation,
@@ -281,6 +282,7 @@ export default function App() {
     },
     [startSimulation]
   );
+
 
   const handleRunParams = useCallback((params: RunParams) => {
     setLastRunParams(params);
@@ -391,6 +393,7 @@ export default function App() {
         <aside className={`sidebar${sidebarOpen ? "" : " collapsed"}`}>
           <WeatherPanel
             onStartSimulation={handleStartSimulation}
+            onStartMultiDaySimulation={startMultiDaySimulation}
             onComputeBurnProbability={handleComputeBurnProbability}
             onRunParams={handleRunParams}
             ignitionPoint={ignitionPoint}

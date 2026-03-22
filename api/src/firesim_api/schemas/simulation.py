@@ -106,6 +106,7 @@ class SimulationFrame(BaseModel):
     spot_fires: list[dict] | None = None
     num_fronts: int = 1
     burned_cells: list[dict] | None = None
+    day: int | None = None  # Multi-day scenario: which day (1-based)
 
 
 class SimulationResponse(BaseModel):
@@ -116,6 +117,41 @@ class SimulationResponse(BaseModel):
     config: SimulationCreate | None = None
     frames: list[SimulationFrame] = []
     error: str | None = None
+
+
+class DayWeatherParams(BaseModel):
+    """Weather conditions for one day of a multi-day scenario."""
+
+    wind_speed: float = Field(..., ge=0, le=100, description="Wind speed in km/h")
+    wind_direction: float = Field(..., ge=0, lt=360, description="Wind direction (degrees FROM)")
+    temperature: float = Field(default=25.0, ge=-40, le=50, description="Noon temperature (°C)")
+    relative_humidity: float = Field(default=30.0, ge=0, le=100, description="Noon RH (%)")
+    precipitation_24h: float = Field(default=0.0, ge=0, description="24-hour precipitation (mm)")
+
+
+class MultiDaySimulationCreate(BaseModel):
+    """Request body for a multi-day fire scenario (24h/48h/72h).
+
+    Each entry in `days` represents one 24-hour period. The FWI system
+    carries FFMC/DMC/DC forward between days using CFFDRS daily equations.
+    The fire perimeter from the end of each day is used as the starting
+    front for the next day.
+    """
+
+    ignition_lat: float = Field(..., ge=-90, le=90, description="Ignition latitude")
+    ignition_lng: float = Field(..., ge=-180, le=180, description="Ignition longitude")
+    days: list[DayWeatherParams] = Field(
+        ..., min_length=1, max_length=7, description="Weather for each 24-hour period"
+    )
+    fwi_overrides: FWIOverrides | None = None
+    """Starting FWI state (Day 0 carry-in). If None, uses spring startup defaults."""
+    month: int = Field(default=6, ge=1, le=12, description="Month (1-12) for FWI day-length factors")
+    snapshot_interval_minutes: float = Field(default=30.0, gt=0, le=120)
+    fuel_type: str = Field(default="C2", description="Fuel type code")
+    fuel_grid_path: str | None = Field(default=None, description="Path to fuel type GeoTIFF")
+    water_path: str | None = Field(default=None, description="Path to water bodies GeoJSON")
+    buildings_path: str | None = Field(default=None, description="Path to buildings GeoJSON")
+    dem_path: str | None = Field(default=None, description="Path to DEM GeoTIFF for slope-adjusted spread")
 
 
 class BurnProbabilityRequest(BaseModel):

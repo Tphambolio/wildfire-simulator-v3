@@ -59,6 +59,7 @@ class Simulator:
         dt_minutes: float = 5.0,
         num_rays: int = 36,
         spread_modifier_grid: SpreadModifierGrid | None = None,
+        initial_front: list[FireVertex] | None = None,
     ):
         """Initialize simulator.
 
@@ -80,6 +81,7 @@ class Simulator:
         self.dt_minutes = dt_minutes
         self.num_rays = num_rays
         self.spread_modifier_grid = spread_modifier_grid
+        self.initial_front = initial_front
 
     def run(self) -> Generator[SimulationFrame, None, None]:
         """Run the simulation, yielding frames at snapshot intervals.
@@ -99,9 +101,12 @@ class Simulator:
             yield from self._run_cellular()
             return
 
-        # Initialize fire front at ignition point
-        # Start with a small circle of vertices (avoids single-point issues)
-        front = self._create_ignition_front(config.ignition_lat, config.ignition_lng)
+        # Initialize fire front — use provided front (multi-day continuation) or
+        # create a fresh ignition circle from the ignition point.
+        if self.initial_front is not None and len(self.initial_front) >= 3:
+            front = self.initial_front
+        else:
+            front = self._create_ignition_front(config.ignition_lat, config.ignition_lng)
 
         # Build spread conditions from config
         conditions = SpreadConditions(
