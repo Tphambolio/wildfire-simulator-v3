@@ -55,8 +55,8 @@ _COLS = 50
 
 
 def _write_fuel_raster(path: Path) -> Path:
-    """Write a 50×50 GeoTIFF with all-C2 fuel (FBP code 12)."""
-    data = np.full((_ROWS, _COLS), 12, dtype=np.int32)  # code 12 → C2
+    """Write a 50×50 GeoTIFF with all-C2 fuel (FBP code 2)."""
+    data = np.full((_ROWS, _COLS), 2, dtype=np.int32)  # code 2 → C2 (fuel_loader ALL_CODES)
     transform = from_origin(_WEST, _NORTH, _CELL_M, _CELL_M)
     with rasterio.open(
         path, "w", driver="GTiff",
@@ -426,6 +426,20 @@ class TestWebSocketStreaming:
 # ---------------------------------------------------------------------------
 
 
+def _sync_wait_for_completion(
+    client: TestClient, sim_id: str, timeout_s: float = 120.0
+) -> dict:
+    """Synchronous poll helper for TestClient-based tests."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        resp = client.get(f"/api/v1/simulations/{sim_id}")
+        data = resp.json()
+        if data["status"] in ("completed", "failed"):
+            return data
+        time.sleep(0.25)
+    raise TimeoutError(f"Simulation {sim_id} did not finish within {timeout_s}s")
+
+
 class TestFrontendRenderingContract:
     """Verifies the data contract that drives MapView.tsx CA vs. Huygens rendering.
 
@@ -437,18 +451,18 @@ class TestFrontendRenderingContract:
             → fire-perimeter source is populated (Huygens polygon)
             → fire-heatmap source is cleared
 
-    These tests confirm the API response provides the correct data shape.
+    These tests use TestClient (sync) to avoid cross-test event-loop state issues
+    from the module-level SimulationRunner singleton.
     """
 
-    async def test_ca_frames_have_nonempty_burned_cells_for_heatmap(
-        self, client, spatial_fixtures
-    ):
+    def test_ca_frames_have_nonempty_burned_cells_for_heatmap(self, spatial_fixtures):
         """CA frames must have non-empty burned_cells so MapView renders the heatmap."""
-        payload = _ca_payload(spatial_fixtures)
-        resp = await client.post("/api/v1/simulations", json=payload)
-        result = await _wait_for_completion(client, resp.json()["simulation_id"])
+        with TestClient(create_app()) as tc:
+            resp = tc.post("/api/v1/simulations", json=_ca_payload(spatial_fixtures))
+            assert resp.status_code == 200
+            result = _sync_wait_for_completion(tc, resp.json()["simulation_id"])
 
-        assert result["status"] == "completed"
+        assert result["status"] == "completed", f"sim failed: {result.get('error')}"
         for frame in result["frames"]:
             burned = frame.get("burned_cells")
             # Non-null and non-empty → MapView will enter heatmap branch
@@ -457,29 +471,26 @@ class TestFrontendRenderingContract:
                 "MapView would fall through to Huygens polygon branch"
             )
 
-    async def test_ca_frames_have_empty_perimeter_so_polygon_not_rendered(
-        self, client, spatial_fixtures
+    def test_ca_frames_have_burned_cells_takes_priority_over_perimeter(
+        self, spatial_fixtures
     ):
-        """CA frames should not produce meaningful polygon data.
+        """CA frames must have burned_cells to trigger the heatmap branch in MapView.
 
-        The simulator sets perimeter to a sampled subset of burned cell
-        coordinates. MapView clears fire-perimeter in CA mode, but verifying
-        that the data intent is correct is still worthwhile.
+        The simulator populates perimeter as a sampled point-cloud from burned cells
+        (simulator.py _run_cellular), but MapView.tsx explicitly clears fire-perimeter
+        and populates fire-heatmap when burned_cells is present and non-empty.
         """
-        payload = _ca_payload(spatial_fixtures)
-        resp = await client.post("/api/v1/simulations", json=payload)
-        result = await _wait_for_completion(client, resp.json()["simulation_id"])
+        with TestClient(create_app()) as tc:
+            resp = tc.post("/api/v1/simulations", json=_ca_payload(spatial_fixtures))
+            result = _sync_wait_for_completion(tc, resp.json()["simulation_id"])
 
-        assert result["status"] == "completed"
-        # In CA mode the API still populates perimeter (sampled cell positions),
-        # but MapView clears it when burned_cells is present.
-        # Just verify burned_cells takes precedence by being non-null.
+        assert result["status"] == "completed", f"sim failed: {result.get('error')}"
         final = result["frames"][-1]
         assert final["burned_cells"] is not None, (
             "burned_cells must be present to trigger heatmap branch in MapView"
         )
 
-    async def test_huygens_frames_have_no_burned_cells_so_polygon_rendered(self, client):
+    def test_huygens_frames_have_no_burned_cells_so_polygon_rendered(self):
         """Huygens frames must not populate burned_cells so MapView renders polygon."""
         payload = {
             "ignition_lat": 53.5,
@@ -488,8 +499,9 @@ class TestFrontendRenderingContract:
             "duration_hours": 0.25,
             "snapshot_interval_minutes": 15.0,
         }
-        resp = await client.post("/api/v1/simulations", json=payload)
-        result = await _wait_for_completion(client, resp.json()["simulation_id"])
+        with TestClient(create_app()) as tc:
+            resp = tc.post("/api/v1/simulations", json=payload)
+            result = _sync_wait_for_completion(tc, resp.json()["simulation_id"])
 
         assert result["status"] == "completed"
         for frame in result["frames"]:

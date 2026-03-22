@@ -60,7 +60,7 @@ class ConnectionManager:
 
     def broadcast_from_thread(self, sim_id: str, event: dict[str, Any]) -> None:
         """Thread-safe broadcast — schedules send on the event loop."""
-        if self._loop is None:
+        if self._loop is None or self._loop.is_closed():
             return
         asyncio.run_coroutine_threadsafe(
             self.send_event(sim_id, event), self._loop
