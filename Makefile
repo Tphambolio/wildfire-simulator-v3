@@ -6,13 +6,13 @@ install:
 	cd frontend && npm install
 
 test:
-	PYTHONPATH=engine/src:api/src python -m pytest engine/tests/ api/tests/ -v --tb=short
+	PYTHONPATH=engine/src:api/src python -m pytest engine/tests/ api/tests/ -v --tb=short --import-mode=importlib --asyncio-mode=auto
 
 test-engine:
-	PYTHONPATH=engine/src python -m pytest engine/tests/ -v --tb=short
+	PYTHONPATH=engine/src python -m pytest engine/tests/ -v --tb=short --import-mode=importlib
 
 test-api:
-	PYTHONPATH=engine/src:api/src python -m pytest api/tests/ -v --tb=short
+	PYTHONPATH=engine/src:api/src python -m pytest api/tests/ -v --tb=short --import-mode=importlib
 
 test-cov:
 	python -m pytest engine/tests/ -v --cov=engine/src/firesim --cov-report=term-missing
