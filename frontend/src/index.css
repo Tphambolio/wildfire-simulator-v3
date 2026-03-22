@@ -62,6 +62,39 @@ body {
   color: var(--text-secondary);
 }
 
+/* Simulation control buttons (pause/resume/cancel) in header */
+.btn-control {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.15s;
+}
+
+.btn-control:hover {
+  opacity: 0.85;
+}
+
+.btn-pause {
+  background: rgba(255, 152, 0, 0.2);
+  color: var(--fire-orange);
+  border: 1px solid var(--fire-orange);
+}
+
+.btn-resume {
+  background: rgba(76, 175, 80, 0.2);
+  color: var(--success);
+  border: 1px solid var(--success);
+}
+
+.btn-cancel {
+  background: rgba(244, 67, 54, 0.15);
+  color: var(--fire-red);
+  border: 1px solid var(--fire-red);
+}
+
 .status-badge {
   margin-left: auto;
   padding: 3px 10px;
@@ -84,6 +117,16 @@ body {
 .status-failed {
   background: rgba(244, 67, 54, 0.2);
   color: var(--fire-red);
+}
+
+.status-paused {
+  background: rgba(255, 235, 59, 0.2);
+  color: var(--fire-yellow);
+}
+
+.status-cancelled {
+  background: rgba(160, 160, 176, 0.2);
+  color: var(--text-secondary);
 }
 
 /* Layout */

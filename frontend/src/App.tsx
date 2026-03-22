@@ -21,8 +21,12 @@ export default function App() {
     currentFrameIndex,
     currentFrame,
     isRunning,
+    isPaused,
     startSimulation,
     setFrameIndex,
+    pauseSimulation,
+    resumeSimulation,
+    cancelSimulation,
     error,
   } = useSimulation();
 
@@ -49,6 +53,21 @@ export default function App() {
         >
           {sidebarOpen ? "\u2715" : "\u2630"}
         </button>
+        {isRunning && !isPaused && (
+          <button className="btn-control btn-pause" onClick={pauseSimulation} title="Pause simulation">
+            &#9646;&#9646; Pause
+          </button>
+        )}
+        {isPaused && (
+          <>
+            <button className="btn-control btn-resume" onClick={resumeSimulation} title="Resume simulation">
+              &#9654; Resume
+            </button>
+            <button className="btn-control btn-cancel" onClick={cancelSimulation} title="Cancel simulation">
+              &#9632; Cancel
+            </button>
+          </>
+        )}
         {status && (
           <span className={`status-badge status-${status}`}>
             {status}
