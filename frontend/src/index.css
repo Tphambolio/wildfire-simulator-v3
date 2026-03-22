@@ -254,6 +254,70 @@ select {
   font-size: 13px;
 }
 
+/* Input validation error */
+.input-error {
+  font-size: 11px;
+  color: #e57373;
+  margin-top: -4px;
+  margin-bottom: 4px;
+  padding: 0 2px;
+}
+
+/* Live FWI row — always visible below FWI codes section */
+.fwi-live-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  background: var(--bg-section);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.fwi-live-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.fwi-live-label {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.fwi-danger-badge {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  margin-left: auto;
+}
+
+/* Run params badge in header — shows weather used for last burn prob run */
+.run-params-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.run-params-danger {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+}
+
 /* Buttons */
 .btn-primary {
   width: 100%;

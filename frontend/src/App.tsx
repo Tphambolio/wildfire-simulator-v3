@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import MapView from "./components/MapView";
 import WeatherPanel from "./components/WeatherPanel";
+import type { RunParams } from "./components/WeatherPanel";
 import FireMetrics from "./components/FireMetrics";
 import TimeSlider from "./components/TimeSlider";
 import { useSimulation } from "./hooks/useSimulation";
@@ -74,6 +75,7 @@ export default function App() {
   const [burnProbRunning, setBurnProbRunning] = useState(false);
   const [burnProbError, setBurnProbError] = useState<string | null>(null);
   const [showBurnProbView, setShowBurnProbView] = useState(false);
+  const [lastRunParams, setLastRunParams] = useState<RunParams | null>(null);
 
   const {
     status,
@@ -100,6 +102,10 @@ export default function App() {
     },
     [startSimulation]
   );
+
+  const handleRunParams = useCallback((params: RunParams) => {
+    setLastRunParams(params);
+  }, []);
 
   const handleComputeBurnProbability = useCallback(
     async (params: BurnProbabilityRequest) => {
@@ -164,6 +170,28 @@ export default function App() {
             {showBurnProbView ? "Prob View" : "Spread View"}
           </button>
         )}
+        {showBurnProbView && lastRunParams && (
+          <div className="run-params-badge" title="Weather conditions used for this burn probability run">
+            <span>{lastRunParams.weather.wind_speed} km/h {["N","NE","E","SE","S","SW","W","NW"][Math.round(lastRunParams.weather.wind_direction / 45) % 8]}</span>
+            <span>·</span>
+            <span>FFMC {lastRunParams.fwi.ffmc}</span>
+            <span>·</span>
+            <span>FWI {lastRunParams.fwi_value.toFixed(1)}</span>
+            <span
+              className="run-params-danger"
+              style={{
+                background:
+                  lastRunParams.fwi_value >= 30 ? "#b71c1c" :
+                  lastRunParams.fwi_value >= 20 ? "#e65100" :
+                  lastRunParams.fwi_value >= 10 ? "#f57f17" :
+                  lastRunParams.fwi_value >= 5  ? "#558b2f" : "#2e7d32",
+              }}
+            >
+              {lastRunParams.danger_rating}
+            </span>
+            <span>· {lastRunParams.n_iterations} iter · {lastRunParams.duration_hours}h</span>
+          </div>
+        )}
         {status && (
           <span className={`status-badge status-${status}`}>
             {status}
@@ -176,6 +204,7 @@ export default function App() {
           <WeatherPanel
             onStartSimulation={handleStartSimulation}
             onComputeBurnProbability={handleComputeBurnProbability}
+            onRunParams={handleRunParams}
             ignitionPoint={ignitionPoint}
             isRunning={isRunning}
             burnProbRunning={burnProbRunning}

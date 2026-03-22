@@ -1,13 +1,93 @@
 /** Weather and simulation parameter controls. */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { SimulationCreate, WeatherParams, FWIOverrides, BurnProbabilityRequest } from "../types/simulation";
 import { FUEL_TYPES } from "../types/simulation";
 import { fetchCurrentWeather, calculateFWI } from "../services/api";
 
+// ── Client-side CFFDRS FWI computation (Forestry Canada 1992, ST-X-3) ──────────
+function computeISI(ffmc: number, windSpeedKmh: number): number {
+  const m = 147.27723 * (101 - ffmc) / (59.5 + ffmc);
+  const fW = Math.exp(0.05039 * windSpeedKmh);
+  const fF = 91.9 * Math.exp(-0.1386 * m) * (1 + Math.pow(m, 5.31) / 49300000);
+  return 0.208 * fW * fF;
+}
+
+function computeBUI(dmc: number, dc: number): number {
+  if (dmc + 0.4 * dc === 0) return 0;
+  if (dmc <= 0.4 * dc) {
+    return 0.8 * dmc * dc / (dmc + 0.4 * dc);
+  }
+  return dmc - (1 - 0.8 * dc / (dmc + 0.4 * dc)) * (0.92 + Math.pow(0.0114 * dmc, 1.7));
+}
+
+function computeFWI(isi: number, bui: number): number {
+  const fD = bui <= 80
+    ? 0.626 * Math.pow(bui, 0.809) + 2
+    : 1000 / (25 + 108.64 * Math.exp(-0.023 * bui));
+  const B = 0.1 * isi * fD;
+  return B > 1
+    ? Math.exp(2.72 * Math.pow(0.434 * Math.log(B), 0.647))
+    : B;
+}
+
+function dangerRating(fwi: number): string {
+  if (fwi < 5) return "Low";
+  if (fwi < 10) return "Moderate";
+  if (fwi < 20) return "High";
+  if (fwi < 30) return "Very High";
+  return "Extreme";
+}
+
+// ── Validation ───────────────────────────────────────────────────────────────
+interface ValidationErrors {
+  wind_speed?: string;
+  wind_direction?: string;
+  temperature?: string;
+  relative_humidity?: string;
+  precipitation_24h?: string;
+  ffmc?: string;
+  dmc?: string;
+  dc?: string;
+}
+
+function validateInputs(weather: WeatherParams, fwi: FWIOverrides): ValidationErrors {
+  const errors: ValidationErrors = {};
+  if (weather.wind_speed < 0 || weather.wind_speed > 100)
+    errors.wind_speed = "Must be 0–100 km/h";
+  if (weather.wind_direction < 0 || weather.wind_direction > 360)
+    errors.wind_direction = "Must be 0–360°";
+  if (weather.temperature < -40 || weather.temperature > 50)
+    errors.temperature = "Must be −40 to 50°C";
+  if (weather.relative_humidity < 1 || weather.relative_humidity > 100)
+    errors.relative_humidity = "Must be 1–100%";
+  if (weather.precipitation_24h < 0 || weather.precipitation_24h > 300)
+    errors.precipitation_24h = "Must be 0–300 mm";
+  if (fwi.ffmc !== null && (fwi.ffmc < 0 || fwi.ffmc > 101))
+    errors.ffmc = "Must be 0–101";
+  if (fwi.dmc !== null && (fwi.dmc < 0 || fwi.dmc > 999))
+    errors.dmc = "Must be 0–999";
+  if (fwi.dc !== null && (fwi.dc < 0 || fwi.dc > 1000))
+    errors.dc = "Must be 0–1000";
+  return errors;
+}
+
+// ── Props ─────────────────────────────────────────────────────────────────────
+export interface RunParams {
+  weather: WeatherParams;
+  fwi: FWIOverrides;
+  isi: number;
+  bui: number;
+  fwi_value: number;
+  danger_rating: string;
+  n_iterations: number;
+  duration_hours: number;
+}
+
 interface WeatherPanelProps {
   onStartSimulation: (params: SimulationCreate) => void;
   onComputeBurnProbability?: (params: BurnProbabilityRequest) => void;
+  onRunParams?: (params: RunParams) => void;
   ignitionPoint: { lat: number; lng: number } | null;
   isRunning: boolean;
   burnProbRunning?: boolean;
@@ -16,6 +96,7 @@ interface WeatherPanelProps {
 export default function WeatherPanel({
   onStartSimulation,
   onComputeBurnProbability,
+  onRunParams,
   ignitionPoint,
   isRunning,
   burnProbRunning,
@@ -44,8 +125,26 @@ export default function WeatherPanel({
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherMessage, setWeatherMessage] = useState<string | null>(null);
   const [fwiLoading, setFwiLoading] = useState(false);
-  const [computedFWI, setComputedFWI] = useState<{ isi: number; bui: number; fwi: number; danger_rating: string } | null>(null);
   const [mcIterations, setMcIterations] = useState(50);
+
+  // ── Live ISI / BUI / FWI (reactive to slider changes) ────────────────────
+  const liveISI = useMemo(
+    () => computeISI(fwi.ffmc ?? 85, weather.wind_speed),
+    [fwi.ffmc, weather.wind_speed]
+  );
+  const liveBUI = useMemo(
+    () => computeBUI(fwi.dmc ?? 6, fwi.dc ?? 15),
+    [fwi.dmc, fwi.dc]
+  );
+  const liveFWI = useMemo(
+    () => computeFWI(liveISI, liveBUI),
+    [liveISI, liveBUI]
+  );
+  const liveDanger = dangerRating(liveFWI);
+
+  // ── Validation ────────────────────────────────────────────────────────────
+  const validationErrors = useMemo(() => validateInputs(weather, fwi), [weather, fwi]);
+  const hasErrors = Object.keys(validationErrors).length > 0;
 
   const EDMONTON_FUEL_GRID_PATH =
     "/home/rpas/dev/wildfire/wildfire-self-learning/data/fuel_maps/Edmonton_FBP_FuelLayer_20251105_10m.tif";
@@ -57,7 +156,17 @@ export default function WeatherPanel({
     "/home/rpas/dev/wildfire/wildfire-self-learning/data/wui_zones.geojson.gz";
 
   const handleMonteCarlo = () => {
-    if (!ignitionPoint || !onComputeBurnProbability) return;
+    if (!ignitionPoint || !onComputeBurnProbability || hasErrors) return;
+    onRunParams?.({
+      weather,
+      fwi,
+      isi: liveISI,
+      bui: liveBUI,
+      fwi_value: liveFWI,
+      danger_rating: liveDanger,
+      n_iterations: mcIterations,
+      duration_hours: durationHours,
+    });
     onComputeBurnProbability({
       ignition_lat: ignitionPoint.lat,
       ignition_lng: ignitionPoint.lng,
@@ -72,7 +181,7 @@ export default function WeatherPanel({
   };
 
   const handleSubmit = () => {
-    if (!ignitionPoint) return;
+    if (!ignitionPoint || hasErrors) return;
     onStartSimulation({
       ignition_lat: ignitionPoint.lat,
       ignition_lng: ignitionPoint.lng,
@@ -117,7 +226,6 @@ export default function WeatherPanel({
 
   const handleComputeFWI = async () => {
     setFwiLoading(true);
-    setComputedFWI(null);
     try {
       const result = await calculateFWI({
         temperature: weather.temperature,
@@ -129,10 +237,9 @@ export default function WeatherPanel({
         dc_prev: fwi.dc ?? 15,
       });
       setFwi({ ffmc: result.ffmc, dmc: result.dmc, dc: result.dc });
-      setComputedFWI({ isi: result.isi, bui: result.bui, fwi: result.fwi, danger_rating: result.danger_rating });
       if (!showAdvanced) setShowAdvanced(true);
     } catch {
-      setComputedFWI(null);
+      // silently fail — live computation still shown
     } finally {
       setFwiLoading(false);
     }
@@ -143,6 +250,12 @@ export default function WeatherPanel({
     const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
     return dirs[Math.round(deg / 45) % 8];
   };
+
+  const dangerColor = (fwiVal: number) =>
+    fwiVal >= 30 ? "#b71c1c" :
+    fwiVal >= 20 ? "#e65100" :
+    fwiVal >= 10 ? "#f57f17" :
+    fwiVal >= 5  ? "#558b2f" : "#2e7d32";
 
   return (
     <div className="panel weather-panel">
@@ -166,13 +279,16 @@ export default function WeatherPanel({
           <input
             type="range"
             min={0}
-            max={80}
+            max={100}
             value={weather.wind_speed}
             onChange={(e) =>
               setWeather({ ...weather, wind_speed: Number(e.target.value) })
             }
           />
         </label>
+        {validationErrors.wind_speed && (
+          <div className="input-error">{validationErrors.wind_speed}</div>
+        )}
 
         <label>
           Wind Direction: <strong>{weather.wind_direction}° ({windLabel(weather.wind_direction)})</strong>
@@ -199,6 +315,9 @@ export default function WeatherPanel({
             }
           />
         </label>
+        {validationErrors.temperature && (
+          <div className="input-error">{validationErrors.temperature}</div>
+        )}
 
         <label>
           Relative Humidity: <strong>{weather.relative_humidity}%</strong>
@@ -215,6 +334,9 @@ export default function WeatherPanel({
             }
           />
         </label>
+        {validationErrors.relative_humidity && (
+          <div className="input-error">{validationErrors.relative_humidity}</div>
+        )}
 
         <label>
           24h Precipitation: <strong>{weather.precipitation_24h} mm</strong>
@@ -330,12 +452,12 @@ export default function WeatherPanel({
         className="toggle-advanced"
         onClick={() => setShowAdvanced(!showAdvanced)}
       >
-        {showAdvanced ? "Hide" : "Show"} FWI Overrides
+        {showAdvanced ? "Hide" : "Show"} FWI Codes
       </button>
 
       {showAdvanced && (
         <div className="section">
-          <h4>FWI Components</h4>
+          <h4>FWI Fuel Moisture Codes</h4>
           <label>
             FFMC: <strong>{fwi.ffmc}</strong>
             <input
@@ -348,64 +470,75 @@ export default function WeatherPanel({
               }
             />
           </label>
+          {validationErrors.ffmc && (
+            <div className="input-error">{validationErrors.ffmc}</div>
+          )}
+
           <label>
             DMC: <strong>{fwi.dmc}</strong>
             <input
               type="range"
               min={0}
-              max={200}
+              max={999}
               value={fwi.dmc ?? 40}
               onChange={(e) =>
                 setFwi({ ...fwi, dmc: Number(e.target.value) })
               }
             />
           </label>
+          {validationErrors.dmc && (
+            <div className="input-error">{validationErrors.dmc}</div>
+          )}
+
           <label>
             DC: <strong>{fwi.dc}</strong>
             <input
               type="range"
               min={0}
-              max={800}
+              max={1000}
               value={fwi.dc ?? 200}
               onChange={(e) =>
                 setFwi({ ...fwi, dc: Number(e.target.value) })
               }
             />
           </label>
+          {validationErrors.dc && (
+            <div className="input-error">{validationErrors.dc}</div>
+          )}
 
           <button
             className="toggle-advanced"
             onClick={handleComputeFWI}
             disabled={fwiLoading}
-            title="Compute today's FFMC/DMC/DC from the weather inputs above, using current sliders as yesterday's starting codes"
+            title="Update FFMC/DMC/DC from today's weather inputs"
             style={{ marginTop: "8px" }}
           >
-            {fwiLoading ? "Computing..." : "Compute FWI from Weather"}
+            {fwiLoading ? "Computing..." : "Update Codes from Weather"}
           </button>
-
-          {computedFWI && (
-            <div style={{ marginTop: "8px", fontSize: "0.9em", lineHeight: "1.6" }}>
-              <span style={{ opacity: 0.7 }}>ISI </span><strong>{computedFWI.isi.toFixed(1)}</strong>
-              {"  "}
-              <span style={{ opacity: 0.7 }}>BUI </span><strong>{computedFWI.bui.toFixed(0)}</strong>
-              {"  "}
-              <span style={{ opacity: 0.7 }}>FWI </span><strong>{computedFWI.fwi.toFixed(1)}</strong>
-              {"  "}
-              <span style={{
-                padding: "1px 6px",
-                borderRadius: "3px",
-                fontSize: "0.85em",
-                background: computedFWI.fwi >= 30 ? "#b71c1c" :
-                            computedFWI.fwi >= 19 ? "#e65100" :
-                            computedFWI.fwi >= 10 ? "#f57f17" : "#2e7d32",
-                color: "#fff",
-              }}>
-                {computedFWI.danger_rating}
-              </span>
-            </div>
-          )}
         </div>
       )}
+
+      {/* ── Live FWI indices — always visible ─────────────────────────────── */}
+      <div className="fwi-live-row">
+        <span className="fwi-live-item">
+          <span className="fwi-live-label">ISI</span>
+          <strong>{liveISI.toFixed(1)}</strong>
+        </span>
+        <span className="fwi-live-item">
+          <span className="fwi-live-label">BUI</span>
+          <strong>{liveBUI.toFixed(0)}</strong>
+        </span>
+        <span className="fwi-live-item">
+          <span className="fwi-live-label">FWI</span>
+          <strong>{liveFWI.toFixed(1)}</strong>
+        </span>
+        <span
+          className="fwi-danger-badge"
+          style={{ background: dangerColor(liveFWI) }}
+        >
+          {liveDanger}
+        </span>
+      </div>
 
       <button
         className="toggle-advanced"
@@ -434,7 +567,8 @@ export default function WeatherPanel({
       <button
         className="btn-primary"
         onClick={handleSubmit}
-        disabled={!ignitionPoint || isRunning}
+        disabled={!ignitionPoint || isRunning || hasErrors}
+        title={hasErrors ? "Fix validation errors before running" : undefined}
       >
         {isRunning ? "Simulating..." : "Run Simulation"}
       </button>
@@ -461,23 +595,30 @@ export default function WeatherPanel({
             className="btn-secondary"
             style={{ width: "100%", background: "#1a3060", borderColor: "#3a60a0" }}
             onClick={handleMonteCarlo}
-            disabled={!ignitionPoint || burnProbRunning || isRunning || (!useEdmontonGrid && !useSyntheticCA)}
+            disabled={!ignitionPoint || burnProbRunning || isRunning || (!useEdmontonGrid && !useSyntheticCA) || hasErrors}
             title={
-              !useEdmontonGrid && !useSyntheticCA
-                ? "Enable Edmonton Grid or Synthetic CA to run Monte Carlo"
-                : "Run Monte Carlo burn probability analysis"
+              hasErrors
+                ? "Fix validation errors before running"
+                : !useEdmontonGrid && !useSyntheticCA
+                  ? "Enable Edmonton Grid or Synthetic CA to run Monte Carlo"
+                  : "Apply weather conditions & run Monte Carlo burn probability"
             }
           >
-            {burnProbRunning ? `Running ${mcIterations} iterations...` : "Burn Probability (Monte Carlo)"}
+            {burnProbRunning ? `Running ${mcIterations} iterations...` : "Apply & Run Burn Probability"}
           </button>
           {burnProbRunning && (
             <div className="burn-prob-progress">
               <div className="burn-prob-progress-bar" />
             </div>
           )}
-          {!useEdmontonGrid && !useSyntheticCA && (
+          {!useEdmontonGrid && !useSyntheticCA && !hasErrors && (
             <div style={{ fontSize: 11, color: "#778", marginTop: 4 }}>
               Enable Edmonton Grid or Synthetic CA to use Monte Carlo.
+            </div>
+          )}
+          {hasErrors && (
+            <div style={{ fontSize: 11, color: "#e57373", marginTop: 4 }}>
+              Fix input errors before running.
             </div>
           )}
         </div>
