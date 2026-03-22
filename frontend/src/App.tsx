@@ -10,6 +10,79 @@ import { useSimulation } from "./hooks/useSimulation";
 import { computeBurnProbability } from "./services/api";
 import type { SimulationCreate, SimulationFrame, BurnProbabilityRequest, BurnProbabilityResponse } from "./types/simulation";
 
+/**
+ * Export burn probability contour polygons as GeoJSON.
+ * Three MultiPolygon features at 25 / 50 / 75 % thresholds.
+ * Each cell in the probability grid becomes a rectangular polygon ring.
+ */
+function exportBurnProbGeoJSON(
+  data: BurnProbabilityResponse,
+  lastRunParams: RunParams | null,
+  ignitionPoint: { lat: number; lng: number } | null
+) {
+  const { burn_probability, rows, cols, lat_min, lat_max, lng_min, lng_max } = data;
+  const cellLat = (lat_max - lat_min) / rows;
+  const cellLng = (lng_max - lng_min) / cols;
+
+  const thresholds = [
+    { probability: 0.25, label: "25%" },
+    { probability: 0.50, label: "50%" },
+    { probability: 0.75, label: "75%" },
+  ];
+
+  const sharedProps = {
+    run_date: new Date().toISOString(),
+    wind_speed: lastRunParams?.weather.wind_speed ?? null,
+    wind_dir: lastRunParams?.weather.wind_direction ?? null,
+    fwi: lastRunParams?.fwi_value != null ? +lastRunParams.fwi_value.toFixed(1) : null,
+    danger_rating: lastRunParams?.danger_rating ?? null,
+    n_iterations: data.n_iterations,
+    iterations_completed: data.iterations_completed,
+    ignition_lat: ignitionPoint?.lat ?? null,
+    ignition_lon: ignitionPoint?.lng ?? null,
+    cell_size_m: data.cell_size_m,
+  };
+
+  const features = thresholds.map(({ probability, label }) => {
+    // Collect all cell rings that meet the threshold
+    const rings: number[][][] = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const p = burn_probability[r]?.[c] ?? 0;
+        if (p < probability) continue;
+        const latTop = lat_max - r * cellLat;
+        const latBot = lat_max - (r + 1) * cellLat;
+        const lngL = lng_min + c * cellLng;
+        const lngR = lng_min + (c + 1) * cellLng;
+        rings.push([[lngL, latBot], [lngR, latBot], [lngR, latTop], [lngL, latTop], [lngL, latBot]]);
+      }
+    }
+    return {
+      type: "Feature" as const,
+      properties: { probability, label, ...sharedProps },
+      geometry: {
+        type: "MultiPolygon" as const,
+        coordinates: rings.map((ring) => [ring]),
+      },
+    };
+  });
+
+  const geojson = {
+    type: "FeatureCollection" as const,
+    crs: { type: "name", properties: { name: "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+    features,
+  };
+
+  const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: "application/geo+json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const ts = new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-");
+  a.href = url;
+  a.download = `burn-probability-${ts}.geojson`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function exportPerimeterGeoJSON(
   frames: SimulationFrame[],
   ignitionPoint: { lat: number; lng: number } | null
@@ -172,6 +245,15 @@ export default function App() {
             title="Toggle between burn probability heatmap and fire spread view"
           >
             {showBurnProbView ? "Prob View" : "Spread View"}
+          </button>
+        )}
+        {burnProbabilityData && !burnProbRunning && (
+          <button
+            className="btn-control btn-export"
+            onClick={() => exportBurnProbGeoJSON(burnProbabilityData, lastRunParams, ignitionPoint)}
+            title="Export burn probability contours (25/50/75%) as GeoJSON — compatible with QGIS, ArcGIS, GPS units"
+          >
+            Export BP GeoJSON
           </button>
         )}
         {showBurnProbView && lastRunParams && (
