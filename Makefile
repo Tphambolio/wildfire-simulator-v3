@@ -12,7 +12,7 @@ test-engine:
 	PYTHONPATH=engine/src python -m pytest engine/tests/ -v --tb=short --import-mode=importlib
 
 test-api:
-	PYTHONPATH=engine/src:api/src python -m pytest api/tests/ -v --tb=short --import-mode=importlib
+	PYTHONPATH=engine/src:api/src python -m pytest api/tests/ -v --tb=short --import-mode=importlib --asyncio-mode=auto
 
 test-cov:
 	python -m pytest engine/tests/ -v --cov=engine/src/firesim --cov-report=term-missing

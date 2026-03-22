@@ -6,11 +6,13 @@ Research and development tool for Canadian FBP fire spread simulation.
 
 Simulates wildfire spread using the Canadian Forest Fire Behavior Prediction (FBP) System:
 - All 18 FBP fuel types (ST-X-3 validated)
-- Huygens wavelet fire spread (same method as Prometheus)
+- Huygens wavelet fire spread (open wildland) and cellular automaton (urban/WUI)
 - FWI System (FFMC, DMC, DC, ISI, BUI, FWI)
 - Crown fire initiation (Van Wagner 1977)
+- Ember spotting (Albini 1979) with multi-front ignition
 - Directional slope effects (Butler 2007 cap, Anderson 1983 downslope)
-- Interactive map with click-to-ignite and real-time perimeter streaming
+- Spatial fuel/water/buildings/WUI-zone grids
+- Interactive map with click-to-ignite, real-time streaming, pause/resume/cancel
 
 ## Stack
 
@@ -44,21 +46,16 @@ docker compose up --build
 ## Testing
 
 ```bash
-# Engine tests (294 tests)
-python -m pytest engine/tests/ -v
-
-# API tests (6 tests)
-PYTHONPATH=engine/src:api/src python -m pytest api/tests/ -v
-
-# All tests
-make test
+make test           # All 386 tests
+make test-engine    # 369 engine tests
+make test-api       # 17 API integration tests
 ```
 
 ## Project structure
 
 ```
-engine/     Pure Python fire science (zero web deps, 294 tests)
-api/        FastAPI backend with WebSocket streaming (6 tests)
+engine/     Pure Python fire science (zero web deps, 369 tests)
+api/        FastAPI backend with WebSocket streaming (17 tests)
 frontend/   React + Vite + TypeScript + MapLibre GL
 ```
 
@@ -76,5 +73,6 @@ GET  /api/v1/health               Health check
 - Forestry Canada Fire Danger Group (1992). ST-X-3.
 - Tymstra, C. et al. (2010). Prometheus: Canadian Wildland Fire Growth Simulation Model.
 - Van Wagner, C.E. (1977). Crown fire initiation.
+- Albini, F.A. (1979). Spot fire distance from burning trees.
 - Butler et al. (2007). Slope effect observations.
 - Anderson (1983). Downslope fire spread.
