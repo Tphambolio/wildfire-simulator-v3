@@ -28,9 +28,22 @@ export default function WeatherPanel({
     dc: 300,
   });
   const [fuelType, setFuelType] = useState("C2");
+  const [useEdmontonGrid, setUseEdmontonGrid] = useState(false);
+  const [includeWater, setIncludeWater] = useState(true);
+  const [includeBuildings, setIncludeBuildings] = useState(true);
+  const [includeWUI, setIncludeWUI] = useState(true);
   const [durationHours, setDurationHours] = useState(4);
   const [snapshotMinutes, setSnapshotMinutes] = useState(30);
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const EDMONTON_FUEL_GRID_PATH =
+    "/home/rpas/dev/wildfire/wildfire-self-learning/data/fuel_maps/Edmonton_FBP_FuelLayer_20251105_10m.tif";
+  const EDMONTON_WATER_PATH =
+    "/home/rpas/dev/wildfire/wildfire-self-learning/data/edmonton_water_bodies.geojson.gz";
+  const EDMONTON_BUILDINGS_PATH =
+    "/home/rpas/dev/wildfire/wildfire-self-learning/data/edmonton_buildings.geojson.gz";
+  const EDMONTON_WUI_PATH =
+    "/home/rpas/dev/wildfire/wildfire-self-learning/data/wui_zones.geojson.gz";
 
   const handleSubmit = () => {
     if (!ignitionPoint) return;
@@ -42,6 +55,10 @@ export default function WeatherPanel({
       duration_hours: durationHours,
       snapshot_interval_minutes: snapshotMinutes,
       fuel_type: fuelType,
+      fuel_grid_path: useEdmontonGrid ? EDMONTON_FUEL_GRID_PATH : null,
+      water_path: useEdmontonGrid && includeWater ? EDMONTON_WATER_PATH : null,
+      buildings_path: useEdmontonGrid && includeBuildings ? EDMONTON_BUILDINGS_PATH : null,
+      wui_zones_path: useEdmontonGrid && includeWUI ? EDMONTON_WUI_PATH : null,
     });
   };
 
@@ -126,16 +143,57 @@ export default function WeatherPanel({
 
       <div className="section">
         <h4>Fuel Type</h4>
-        <select
-          value={fuelType}
-          onChange={(e) => setFuelType(e.target.value)}
-        >
-          {Object.entries(FUEL_TYPES).map(([code, name]) => (
-            <option key={code} value={code}>
-              {code} — {name}
-            </option>
-          ))}
-        </select>
+        <label style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+          <input
+            type="checkbox"
+            checked={useEdmontonGrid}
+            onChange={(e) => setUseEdmontonGrid(e.target.checked)}
+          />
+          Use Edmonton Fuel Grid (FBP 10m)
+        </label>
+        {!useEdmontonGrid && (
+          <select
+            value={fuelType}
+            onChange={(e) => setFuelType(e.target.value)}
+          >
+            {Object.entries(FUEL_TYPES).map(([code, name]) => (
+              <option key={code} value={code}>
+                {code} — {name}
+              </option>
+            ))}
+          </select>
+        )}
+        {useEdmontonGrid && (
+          <>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px", paddingLeft: "20px" }}>
+              <input
+                type="checkbox"
+                checked={includeWater}
+                onChange={(e) => setIncludeWater(e.target.checked)}
+              />
+              Water bodies (rivers, lakes)
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px", paddingLeft: "20px" }}>
+              <input
+                type="checkbox"
+                checked={includeBuildings}
+                onChange={(e) => setIncludeBuildings(e.target.checked)}
+              />
+              Buildings (341K footprints)
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px", paddingLeft: "20px" }}>
+              <input
+                type="checkbox"
+                checked={includeWUI}
+                onChange={(e) => setIncludeWUI(e.target.checked)}
+              />
+              WUI zone modifiers (425 zones)
+            </label>
+            <div className="hint" style={{ fontSize: "0.85em", opacity: 0.7 }}>
+              Spatial fuel types: D2, O1a, O1b, S2, C1. Fallback: {fuelType}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="section">

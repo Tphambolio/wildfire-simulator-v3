@@ -91,6 +91,14 @@ export function useSimulation() {
 
       ws.onclose = () => {
         wsRef.current = null;
+        // If simulation is still running when WS closes (e.g. long data load),
+        // fall back to polling so we still get results
+        setState((prev) => {
+          if (prev.isRunning) {
+            pollForResults(simId);
+          }
+          return prev;
+        });
       };
     } catch (err) {
       setState((prev) => ({

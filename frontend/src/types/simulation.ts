@@ -22,6 +22,10 @@ export interface SimulationCreate {
   duration_hours: number;
   snapshot_interval_minutes: number;
   fuel_type: string;
+  fuel_grid_path?: string | null;
+  water_path?: string | null;
+  buildings_path?: string | null;
+  wui_zones_path?: string | null;
 }
 
 export interface SimulationFrame {
@@ -33,6 +37,9 @@ export interface SimulationFrame {
   fire_type: string;
   flame_length_m: number;
   fuel_breakdown: Record<string, number>;
+  spot_fires?: Array<{ lat: number; lng: number; distance_m: number; hfi_kw_m: number }> | null;
+  num_fronts?: number;
+  burned_cells?: Array<{ lat: number; lng: number; intensity: number; fuel: string }> | null;
 }
 
 export type SimulationStatus = "pending" | "running" | "completed" | "failed";

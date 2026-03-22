@@ -10,6 +10,67 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { SimulationFrame } from "../types/simulation";
 
+function LocationSearch({ onSelect }: { onSelect: (lat: number, lng: number, name: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Array<{ display_name: string; lat: string; lon: string }>>([]);
+  const [loading, setLoading] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const search = (q: string) => {
+    if (q.length < 3) { setResults([]); return; }
+    setLoading(true);
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`)
+      .then(r => r.json())
+      .then(data => { setResults(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  };
+
+  const handleInput = (value: string) => {
+    setQuery(value);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => search(value), 400);
+  };
+
+  return (
+    <div className="location-search" style={{
+      position: "absolute", top: 10, left: 10, zIndex: 10,
+      background: "rgba(20, 30, 50, 0.92)", borderRadius: 6, padding: "6px",
+      minWidth: 260, maxWidth: 320,
+    }}>
+      <input
+        type="text"
+        placeholder="Search location..."
+        value={query}
+        onChange={e => handleInput(e.target.value)}
+        style={{
+          width: "100%", padding: "6px 10px", border: "1px solid #445",
+          borderRadius: 4, background: "#1a2540", color: "#e0e0e0",
+          fontSize: 13, outline: "none", boxSizing: "border-box",
+        }}
+      />
+      {loading && <div style={{ color: "#888", fontSize: 12, padding: "4px 6px" }}>Searching...</div>}
+      {results.length > 0 && (
+        <div style={{ maxHeight: 180, overflowY: "auto" }}>
+          {results.map((r, i) => (
+            <div key={i} onClick={() => {
+              onSelect(parseFloat(r.lat), parseFloat(r.lon), r.display_name);
+              setResults([]); setQuery(r.display_name.split(",")[0]);
+            }} style={{
+              padding: "5px 8px", cursor: "pointer", fontSize: 12,
+              color: "#ccc", borderTop: "1px solid #334",
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = "#2a3a5a")}
+            onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+            >
+              {r.display_name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || "";
 
 type BasemapId = string;
@@ -97,6 +158,9 @@ export default function MapView({
   // basemap switches that destroy and recreate sources.
   const [fireLayersVersion, setFireLayersVersion] = useState(0);
   const prevBasemapRef = useRef<BasemapId>("osm");
+  const [showSpotFires, setShowSpotFires] = useState(true);
+  const pulseAnimRef = useRef<number | null>(null);
+  const spotPopupRef = useRef<maplibregl.Popup | null>(null);
 
   const addFireLayers = useCallback((m: maplibregl.Map) => {
     // Remove stale sources if they somehow survived (defensive)
@@ -108,6 +172,12 @@ export default function MapView({
     if (m.getSource("fire-history")) {
       if (m.getLayer("fire-history-outline")) m.removeLayer("fire-history-outline");
       m.removeSource("fire-history");
+    }
+    // Remove CA heatmap layers if present
+    if (m.getSource("fire-heatmap")) {
+      if (m.getLayer("fire-heatmap-layer")) m.removeLayer("fire-heatmap-layer");
+      if (m.getLayer("fire-cells-layer")) m.removeLayer("fire-cells-layer");
+      m.removeSource("fire-heatmap");
     }
 
     m.addSource("fire-perimeter", {
@@ -163,6 +233,131 @@ export default function MapView({
       "fire-fill"
     );
 
+    // CA heatmap source + layers (for cellular automaton mode)
+    m.addSource("fire-heatmap", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+
+    m.addLayer({
+      id: "fire-heatmap-layer",
+      type: "heatmap",
+      source: "fire-heatmap",
+      paint: {
+        "heatmap-weight": ["interpolate", ["linear"], ["get", "intensity"], 0, 0, 15000, 1],
+        "heatmap-intensity": 1.5,
+        "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 10, 8, 14, 25, 16, 40],
+        "heatmap-color": [
+          "interpolate", ["linear"], ["heatmap-density"],
+          0, "rgba(0,0,0,0)",
+          0.1, "rgba(255,255,180,0.4)",
+          0.3, "rgba(255,200,50,0.6)",
+          0.5, "rgba(255,140,20,0.7)",
+          0.7, "rgba(220,60,20,0.8)",
+          0.9, "rgba(180,30,10,0.9)",
+          1.0, "rgba(120,10,5,1.0)",
+        ],
+        "heatmap-opacity": 0.85,
+      },
+    });
+
+    // Individual cell circles (visible at high zoom)
+    m.addLayer({
+      id: "fire-cells-layer",
+      type: "circle",
+      source: "fire-heatmap",
+      minzoom: 14,
+      paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 3, 17, 10],
+        "circle-color": [
+          "interpolate", ["linear"], ["get", "intensity"],
+          0, "#ffeb3b",
+          2000, "#ff9800",
+          4000, "#f44336",
+          8000, "#b71c1c",
+          15000, "#4a0000",
+        ],
+        "circle-opacity": 0.7,
+        "circle-stroke-width": 0.5,
+        "circle-stroke-color": "#333",
+      },
+    });
+
+    // Spot fires source and layers
+    if (m.getSource("spot-fires")) {
+      if (m.getLayer("spot-fires-pulse")) m.removeLayer("spot-fires-pulse");
+      if (m.getLayer("spot-fires-circle")) m.removeLayer("spot-fires-circle");
+      m.removeSource("spot-fires");
+    }
+    m.addSource("spot-fires", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    // Outer pulsing ring — radius/opacity animated via requestAnimationFrame
+    m.addLayer({
+      id: "spot-fires-pulse",
+      type: "circle",
+      source: "spot-fires",
+      paint: {
+        "circle-radius": 10,
+        "circle-color": "transparent",
+        "circle-opacity": 0,
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#ff6600",
+        "circle-stroke-opacity": 0.8,
+      },
+    });
+    // Inner solid circle
+    m.addLayer({
+      id: "spot-fires-circle",
+      type: "circle",
+      source: "spot-fires",
+      paint: {
+        "circle-radius": 7,
+        "circle-color": "#ff4500",
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#ffcc00",
+        "circle-opacity": 0.95,
+        "circle-stroke-opacity": 1,
+      },
+    });
+
+    // Click handler: show popup with spot fire metadata
+    m.on("click", "spot-fires-circle", (e) => {
+      if (!e.features || e.features.length === 0) return;
+      const props = e.features[0].properties as { distance_m: number; hfi_kw_m: number };
+      if (spotPopupRef.current) spotPopupRef.current.remove();
+      spotPopupRef.current = new maplibregl.Popup({ closeButton: true, maxWidth: "220px" })
+        .setLngLat(e.lngLat)
+        .setHTML(
+          `<div style="background:#1a2540;color:#e0e0e0;padding:8px 10px;border-radius:4px;font-size:12px;line-height:1.6">
+            <strong style="color:#ff9800;font-size:13px">&#x1F525; Spot Fire</strong><br/>
+            <span style="color:#aaa">Distance from front:</span> <b>${props.distance_m.toFixed(0)} m</b><br/>
+            <span style="color:#aaa">Head fire intensity:</span> <b>${props.hfi_kw_m.toFixed(0)} kW/m</b>
+          </div>`
+        )
+        .addTo(m);
+    });
+    m.on("mouseenter", "spot-fires-circle", () => { m.getCanvas().style.cursor = "pointer"; });
+    m.on("mouseleave", "spot-fires-circle", () => { m.getCanvas().style.cursor = ""; });
+
+    // Start pulse animation
+    if (pulseAnimRef.current) cancelAnimationFrame(pulseAnimRef.current);
+    let animStart: number | null = null;
+    const PULSE_CYCLE = 1400;
+    const animatePulse = (ts: number) => {
+      if (!animStart) animStart = ts;
+      const t = ((ts - animStart) % PULSE_CYCLE) / PULSE_CYCLE;
+      const radius = 8 + t * 18;
+      const strokeOpacity = (1 - t) * 0.85;
+      if (m.getLayer("spot-fires-pulse")) {
+        m.setPaintProperty("spot-fires-pulse", "circle-radius", radius);
+        m.setPaintProperty("spot-fires-pulse", "circle-stroke-opacity", strokeOpacity);
+      }
+      pulseAnimRef.current = requestAnimationFrame(animatePulse);
+    };
+    pulseAnimRef.current = requestAnimationFrame(animatePulse);
+
     // Signal that fire layers are ready — triggers perimeter data re-apply
     setFireLayersVersion((v) => v + 1);
   }, []);
@@ -174,8 +369,8 @@ export default function MapView({
     const m = new maplibregl.Map({
       container: mapContainer.current,
       style: BASEMAPS.osm.style(),
-      center: [-114.0, 51.0],
-      zoom: 10,
+      center: [-113.49, 53.55],
+      zoom: 11,
     });
 
     m.addControl(new maplibregl.NavigationControl(), "top-right");
@@ -196,6 +391,8 @@ export default function MapView({
 
     return () => {
       clearTimeout(resizeTimer);
+      if (pulseAnimRef.current) { cancelAnimationFrame(pulseAnimRef.current); pulseAnimRef.current = null; }
+      if (spotPopupRef.current) { spotPopupRef.current.remove(); spotPopupRef.current = null; }
       m.remove();
       map.current = null;
     };
@@ -237,24 +434,65 @@ export default function MapView({
         .setLngLat([ignitionPoint.lng, ignitionPoint.lat])
         .addTo(map.current);
 
-      map.current.flyTo({
-        center: [ignitionPoint.lng, ignitionPoint.lat],
-        zoom: 11,
-        duration: 1000,
-      });
+      // Pan to ignition without changing zoom level
+      map.current.panTo([ignitionPoint.lng, ignitionPoint.lat], { duration: 500 });
     }
   }, [ignitionPoint]);
 
-  // Update fire perimeter on map — depends on fireLayersVersion so it
-  // re-runs after basemap switches recreate the GeoJSON sources.
+  // Update fire visualization — auto-selects heatmap (CA) or polygon (Huygens)
   useEffect(() => {
     if (!map.current || !mapReady || frames.length === 0) return;
 
+    const currentFrame = frames[currentFrameIndex];
+    if (!currentFrame) return;
+
+    // CA mode: burned_cells present → render as heatmap
+    if (currentFrame.burned_cells && currentFrame.burned_cells.length > 0) {
+      const heatSrc = map.current.getSource("fire-heatmap") as maplibregl.GeoJSONSource | undefined;
+      if (!heatSrc) return;
+
+      // Accumulate all burned cells up to current frame
+      const allCells: Array<{ lat: number; lng: number; intensity: number }> = [];
+      for (let i = 0; i <= currentFrameIndex; i++) {
+        const f = frames[i];
+        if (f.burned_cells) {
+          for (const c of f.burned_cells) {
+            allCells.push(c);
+          }
+        }
+      }
+
+      const features: GeoJSON.Feature[] = allCells.map((c) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: [c.lng, c.lat] },
+        properties: { intensity: c.intensity },
+      }));
+
+      heatSrc.setData({ type: "FeatureCollection", features });
+
+      // Clear polygon layers (not used in CA mode)
+      const perimSrc = map.current.getSource("fire-perimeter") as maplibregl.GeoJSONSource | undefined;
+      if (perimSrc) perimSrc.setData({ type: "FeatureCollection", features: [] });
+      const histSrc = map.current.getSource("fire-history") as maplibregl.GeoJSONSource | undefined;
+      if (histSrc) histSrc.setData({ type: "FeatureCollection", features: [] });
+
+      // Update spot fires for current frame
+      const spotSrcCA = map.current.getSource("spot-fires") as maplibregl.GeoJSONSource | undefined;
+      if (spotSrcCA) {
+        const sfFeatures: GeoJSON.Feature[] = (currentFrame.spot_fires ?? []).map((sf) => ({
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [sf.lng, sf.lat] },
+          properties: { distance_m: sf.distance_m, hfi_kw_m: sf.hfi_kw_m },
+        }));
+        spotSrcCA.setData({ type: "FeatureCollection", features: sfFeatures });
+      }
+      return;
+    }
+
+    // Huygens mode: polygon perimeter
     const src = map.current.getSource("fire-perimeter") as maplibregl.GeoJSONSource | undefined;
     if (!src) return;
-
-    const currentFrame = frames[currentFrameIndex];
-    if (!currentFrame || currentFrame.perimeter.length < 3) return;
+    if (currentFrame.perimeter.length < 3) return;
 
     const coords = currentFrame.perimeter.map(([lat, lng]) => [lng, lat]);
     if (
@@ -265,22 +503,14 @@ export default function MapView({
       coords.push(coords[0]);
     }
 
-    const currentGeoJSON: GeoJSON.FeatureCollection = {
+    src.setData({
       type: "FeatureCollection",
-      features: [
-        {
-          type: "Feature",
-          geometry: { type: "Polygon", coordinates: [coords] },
-          properties: {
-            time_hours: currentFrame.time_hours,
-            area_ha: currentFrame.area_ha,
-            hfi: currentFrame.max_hfi_kw_m,
-          },
-        },
-      ],
-    };
-
-    src.setData(currentGeoJSON);
+      features: [{
+        type: "Feature",
+        geometry: { type: "Polygon", coordinates: [coords] },
+        properties: { time_hours: currentFrame.time_hours, area_ha: currentFrame.area_ha, hfi: currentFrame.max_hfi_kw_m },
+      }],
+    });
 
     const historySrc = map.current.getSource("fire-history") as maplibregl.GeoJSONSource | undefined;
     if (!historySrc) return;
@@ -300,15 +530,42 @@ export default function MapView({
         };
       });
 
-    historySrc.setData({
-      type: "FeatureCollection",
-      features: historyFeatures,
-    });
+    historySrc.setData({ type: "FeatureCollection", features: historyFeatures });
+
+    // Clear heatmap (not used in Huygens mode)
+    const heatSrc = map.current.getSource("fire-heatmap") as maplibregl.GeoJSONSource | undefined;
+    if (heatSrc) heatSrc.setData({ type: "FeatureCollection", features: [] });
+
+    // Update spot fires for current frame
+    const spotSrc = map.current.getSource("spot-fires") as maplibregl.GeoJSONSource | undefined;
+    if (spotSrc) {
+      const sfFeatures: GeoJSON.Feature[] = (currentFrame.spot_fires ?? []).map((sf) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: [sf.lng, sf.lat] },
+        properties: { distance_m: sf.distance_m, hfi_kw_m: sf.hfi_kw_m },
+      }));
+      spotSrc.setData({ type: "FeatureCollection", features: sfFeatures });
+    }
   }, [frames, currentFrameIndex, mapReady, fireLayersVersion]);
+
+  // Toggle spot fire layer visibility
+  useEffect(() => {
+    if (!map.current || !mapReady) return;
+    const visibility = showSpotFires ? "visible" : "none";
+    if (map.current.getLayer("spot-fires-circle")) {
+      map.current.setLayoutProperty("spot-fires-circle", "visibility", visibility);
+      map.current.setLayoutProperty("spot-fires-pulse", "visibility", visibility);
+    }
+  }, [showSpotFires, mapReady]);
+
+  const flyTo = useCallback((lat: number, lng: number, zoom = 12) => {
+    map.current?.flyTo({ center: [lng, lat], zoom, duration: 1500 });
+  }, []);
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
       <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
+      <LocationSearch onSelect={(lat, lng) => flyTo(lat, lng)} />
       <div className="basemap-toggle">
         {(Object.keys(BASEMAPS) as BasemapId[]).map((id) => (
           <button
@@ -320,6 +577,25 @@ export default function MapView({
           </button>
         ))}
       </div>
+      <button
+        onClick={() => setShowSpotFires((v) => !v)}
+        style={{
+          position: "absolute",
+          bottom: 36,
+          right: 10,
+          zIndex: 10,
+          padding: "5px 10px",
+          background: showSpotFires ? "rgba(255, 100, 0, 0.85)" : "rgba(20, 30, 50, 0.85)",
+          color: "#fff",
+          border: "1px solid #ff6600",
+          borderRadius: 4,
+          cursor: "pointer",
+          fontSize: 12,
+          fontWeight: 600,
+        }}
+      >
+        {showSpotFires ? "🔥 Spot Fires ON" : "🔥 Spot Fires OFF"}
+      </button>
     </div>
   );
 }
