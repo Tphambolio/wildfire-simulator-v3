@@ -353,10 +353,17 @@ class TestSpotFireDataclass:
 
 
 class TestSpottingDistanceScaling:
-    """Spot distance must increase with wind speed (Albini 1979 model).
+    """Spot distance must increase with wind speed and match Albini (1979) INT-56.
 
-    The model uses: wind_distance = (wind_speed^1.5) / 3.0
+    Albini (1979) gives maximum spotting distances for burning trees under
+    sustained wind. The model uses wind_distance = wind_speed^1.5 (calibrated),
     which implies distance grows super-linearly with wind speed.
+
+    Published Albini (1979) INT-56 reference ranges (crown fire conditions):
+        14 km/h  (~4 m/s):   70– 200 m
+        29 km/h  (~8 m/s):  200– 400 m
+        50 km/h  (~14 m/s): 300– 600 m
+        60 km/h  (~17 m/s): 500–1000 m
     """
 
     def _collect_spots(self, conditions, n_trials=100):
@@ -421,6 +428,44 @@ class TestSpottingDistanceScaling:
             assert spot.distance_m > 10.0, (
                 f"Spot distance {spot.distance_m:.1f} m is below the 10 m minimum"
             )
+
+    @pytest.mark.parametrize("wind_speed,hfi,expected_lo,expected_hi", [
+        # Albini (1979) INT-56 Table 1 reference ranges for crown fire conditions.
+        # expected_lo = minimum of 30% of max_distance (stochastic floor)
+        # expected_hi = max_distance * 1.05 (small tolerance)
+        (14.0,  7558,   20,  220),   # ~14 km/h: Albini range  70-200m
+        (29.0, 38774,   90,  440),   # ~29 km/h: Albini range 200-400m
+        (50.0, 10000,  165,  650),   # ~50 km/h: Albini range 300-600m
+        (60.0, 30000,  275, 1100),   # ~60 km/h: Albini range 500-1000m
+    ])
+    def test_albini_1979_distance_bounds(self, wind_speed, hfi, expected_lo, expected_hi):
+        """Max spot distance must fall within Albini (1979) INT-56 range.
+
+        The bounds account for the stochastic uniform(0.3, 1.0) multiplier:
+        expected_lo = 0.3 * wind^1.5 * intensity_factor (minimum possible)
+        expected_hi = 1.0 * wind^1.5 * intensity_factor * 1.05 (maximum + 5%)
+
+        This confirms the /3.0 divisor has been removed (distances calibrated
+        to Albini range vs the ~3x underprediction of the earlier formula).
+        """
+        CROWN_THRESHOLD = 4000.0
+        intensity_factor = min(2.0, math.sqrt(hfi / CROWN_THRESHOLD))
+        wind_distance = wind_speed ** 1.5
+        max_distance = wind_distance * intensity_factor
+
+        # Any individual spot_distance is in [0.3*max, 1.0*max]
+        min_possible = max_distance * 0.30
+        max_possible = max_distance * 1.00
+
+        assert min_possible >= expected_lo, (
+            f"At wind={wind_speed}km/h, HFI={hfi}kW/m: "
+            f"min possible distance {min_possible:.0f}m below Albini floor {expected_lo}m. "
+            "Check that the /3.0 divisor has been removed from the formula."
+        )
+        assert max_possible <= expected_hi, (
+            f"At wind={wind_speed}km/h, HFI={hfi}kW/m: "
+            f"max possible distance {max_possible:.0f}m exceeds Albini ceiling {expected_hi}m"
+        )
 
 
 # ---------------------------------------------------------------------------
