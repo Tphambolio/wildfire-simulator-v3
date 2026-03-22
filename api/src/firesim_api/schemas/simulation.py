@@ -45,6 +45,22 @@ class SimulationCreate(BaseModel):
         default=30.0, gt=0, le=120, description="Snapshot interval (minutes)"
     )
     fuel_type: str = Field(default="C2", description="Default fuel type code")
+    fuel_grid_path: str | None = Field(
+        default=None,
+        description="Path to FBP fuel type GeoTIFF raster (overrides uniform fuel_type)",
+    )
+    water_path: str | None = Field(
+        default=None,
+        description="Path to water body GeoJSON for non-fuel masking",
+    )
+    buildings_path: str | None = Field(
+        default=None,
+        description="Path to building footprint GeoJSON for non-fuel masking",
+    )
+    wui_zones_path: str | None = Field(
+        default=None,
+        description="Path to WUI zones GeoJSON with spread modifiers",
+    )
 
 
 class SimulationStatus(str, Enum):
@@ -67,6 +83,9 @@ class SimulationFrame(BaseModel):
     fire_type: str
     flame_length_m: float
     fuel_breakdown: dict[str, float]
+    spot_fires: list[dict] | None = None
+    num_fronts: int = 1
+    burned_cells: list[dict] | None = None
 
 
 class SimulationResponse(BaseModel):

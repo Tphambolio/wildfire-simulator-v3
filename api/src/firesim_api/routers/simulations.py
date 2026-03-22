@@ -37,6 +37,9 @@ def _frame_to_schema(frame: SimulationFrame) -> FrameSchema:
         fire_type=frame.fire_type.value,
         flame_length_m=round(frame.flame_length_m, 2),
         fuel_breakdown=frame.fuel_breakdown,
+        spot_fires=frame.spot_fires,
+        num_fronts=frame.num_fronts,
+        burned_cells=frame.burned_cells,
     )
 
 
