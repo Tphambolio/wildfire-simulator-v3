@@ -1,6 +1,6 @@
 /** API client for the FireSim backend. */
 
-import type { SimulationCreate, SimulationResponse } from "../types/simulation";
+import type { SimulationCreate, SimulationResponse, CurrentWeather } from "../types/simulation";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -25,6 +25,19 @@ export async function getSimulation(
   const resp = await fetch(`${API_BASE}/api/v1/simulations/${simId}`);
   if (!resp.ok) {
     throw new Error(`Simulation ${simId} not found`);
+  }
+  return resp.json();
+}
+
+export async function fetchCurrentWeather(
+  lat: number,
+  lng: number
+): Promise<CurrentWeather> {
+  const resp = await fetch(
+    `${API_BASE}/api/v1/weather/current?lat=${lat}&lng=${lng}`
+  );
+  if (!resp.ok) {
+    throw new Error(`Weather fetch failed: ${resp.statusText}`);
   }
   return resp.json();
 }

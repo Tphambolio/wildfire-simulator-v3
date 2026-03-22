@@ -60,6 +60,24 @@ export interface WSEvent {
   state?: "running" | "paused" | "cancelled";
 }
 
+export interface CurrentWeather {
+  lat: number;
+  lng: number;
+  ffmc: number | null;
+  dmc: number | null;
+  dc: number | null;
+  isi: number | null;
+  bui: number | null;
+  fwi: number | null;
+  wind_speed: number | null;
+  wind_direction: number | null;
+  temperature: number | null;
+  relative_humidity: number | null;
+  source: string;
+  available: boolean;
+  message: string;
+}
+
 export const FUEL_TYPES: Record<string, string> = {
   C1: "Spruce-Lichen Woodland",
   C2: "Boreal Spruce",

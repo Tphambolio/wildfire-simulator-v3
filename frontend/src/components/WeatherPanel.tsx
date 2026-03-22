@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { SimulationCreate, WeatherParams, FWIOverrides } from "../types/simulation";
 import { FUEL_TYPES } from "../types/simulation";
+import { fetchCurrentWeather } from "../services/api";
 
 interface WeatherPanelProps {
   onStartSimulation: (params: SimulationCreate) => void;
@@ -35,6 +36,8 @@ export default function WeatherPanel({
   const [durationHours, setDurationHours] = useState(4);
   const [snapshotMinutes, setSnapshotMinutes] = useState(30);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherMessage, setWeatherMessage] = useState<string | null>(null);
 
   const EDMONTON_FUEL_GRID_PATH =
     "/home/rpas/dev/wildfire/wildfire-self-learning/data/fuel_maps/Edmonton_FBP_FuelLayer_20251105_10m.tif";
@@ -60,6 +63,32 @@ export default function WeatherPanel({
       buildings_path: useEdmontonGrid && includeBuildings ? EDMONTON_BUILDINGS_PATH : null,
       wui_zones_path: useEdmontonGrid && includeWUI ? EDMONTON_WUI_PATH : null,
     });
+  };
+
+  const handleLoadWeather = async () => {
+    if (!ignitionPoint) return;
+    setWeatherLoading(true);
+    setWeatherMessage(null);
+    try {
+      const w = await fetchCurrentWeather(ignitionPoint.lat, ignitionPoint.lng);
+      if (w.available) {
+        if (w.wind_speed !== null) setWeather((prev) => ({ ...prev, wind_speed: Math.round(w.wind_speed!) }));
+        if (w.wind_direction !== null) setWeather((prev) => ({ ...prev, wind_direction: Math.round(w.wind_direction!) }));
+        if (w.temperature !== null) setWeather((prev) => ({ ...prev, temperature: Math.round(w.temperature!) }));
+        if (w.relative_humidity !== null) setWeather((prev) => ({ ...prev, relative_humidity: Math.round(w.relative_humidity!) }));
+        setFwi({
+          ffmc: w.ffmc ?? fwi.ffmc,
+          dmc: w.dmc ?? fwi.dmc,
+          dc: w.dc ?? fwi.dc,
+        });
+        if (!showAdvanced) setShowAdvanced(true);
+      }
+      setWeatherMessage(w.message);
+    } catch {
+      setWeatherMessage("Could not reach CWFIS — check network");
+    } finally {
+      setWeatherLoading(false);
+    }
   };
 
   // Wind direction compass label
@@ -267,6 +296,30 @@ export default function WeatherPanel({
               }
             />
           </label>
+        </div>
+      )}
+
+      <button
+        className="toggle-advanced"
+        onClick={handleLoadWeather}
+        disabled={!ignitionPoint || weatherLoading}
+        title="Load current FWI indices from CWFIS for this location"
+      >
+        {weatherLoading ? "Loading..." : "Load Current Fire Weather"}
+      </button>
+
+      {weatherMessage && (
+        <div
+          className="hint"
+          style={{
+            marginBottom: "8px",
+            color: weatherMessage.toLowerCase().includes("not available") ||
+                   weatherMessage.toLowerCase().includes("could not")
+              ? "#e57373"
+              : "#81c784",
+          }}
+        >
+          {weatherMessage}
         </div>
       )}
 
