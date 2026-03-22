@@ -123,7 +123,8 @@ function buildICSText(
   params: RunParams | null,
   ignition: { lat: number; lng: number } | null,
   fuelTypeLabel?: string,
-  atRiskCounts?: { roads: number; communities: number; infrastructure: number }
+  atRiskCounts?: { roads: number; communities: number; infrastructure: number },
+  dayStats?: DayStats[] | null
 ): string {
   const now = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
   const lines: string[] = [
@@ -148,6 +149,19 @@ function buildICSText(
     lines.push(`  FWI:          ${params.fwi_value.toFixed(1)} (${params.danger_rating})`);
     if (fuelTypeLabel) lines.push(`  Fuel:         ${fuelTypeLabel}`);
     lines.push(`  Duration:     ${params.duration_hours}h`);
+    lines.push("");
+  }
+
+  if (dayStats && dayStats.length > 0) {
+    lines.push("MULTI-DAY PROGRESSION");
+    lines.push("  Day   Area (ha)   Peak HFI (kW/m)   Fire Type");
+    for (const d of dayStats) {
+      const day = String(d.day).padEnd(5);
+      const area = d.finalAreaHa.toFixed(0).padEnd(11);
+      const hfi = d.peakHfi.toFixed(0).padEnd(18);
+      const ftype = d.fireType.replace(/_/g, " ");
+      lines.push(`  ${day} ${area} ${hfi} ${ftype}`);
+    }
     lines.push("");
   }
 
@@ -258,7 +272,7 @@ export default function EOCSummary({
 
   if (!spread && !burnArea && !runParams) return null;
 
-  const icsText = buildICSText(spread, burnArea, runParams, ignitionPoint, fuelTypeLabel, atRiskCounts);
+  const icsText = buildICSText(spread, burnArea, runParams, ignitionPoint, fuelTypeLabel, atRiskCounts, dayStats);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(icsText).catch(() => {
