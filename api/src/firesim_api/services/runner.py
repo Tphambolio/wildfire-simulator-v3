@@ -33,6 +33,10 @@ class SimulationRun:
         self.frames: list[SimulationFrame] = []
         self.error: str | None = None
         self._lock = threading.Lock()
+        # Pause/cancel control
+        self._pause_event = threading.Event()
+        self._pause_event.set()  # Initially running (not paused)
+        self._cancel_event = threading.Event()
 
     def add_frame(self, frame: SimulationFrame) -> None:
         with self._lock:
@@ -41,6 +45,24 @@ class SimulationRun:
     def get_frames(self) -> list[SimulationFrame]:
         with self._lock:
             return list(self.frames)
+
+    def pause(self) -> None:
+        """Pause the simulation after the current frame."""
+        if self.status == SimulationStatus.RUNNING:
+            self.status = SimulationStatus.PAUSED
+            self._pause_event.clear()
+
+    def resume(self) -> None:
+        """Resume a paused simulation."""
+        if self.status == SimulationStatus.PAUSED:
+            self.status = SimulationStatus.RUNNING
+            self._pause_event.set()
+
+    def cancel(self) -> None:
+        """Cancel the simulation immediately."""
+        self.status = SimulationStatus.CANCELLED
+        self._cancel_event.set()
+        self._pause_event.set()  # Unblock if paused
 
 
 class SimulationRunner:
@@ -223,9 +245,16 @@ class SimulationRunner:
                 run.add_frame(frame)
                 if on_frame is not None:
                     on_frame(run.id, frame)
+                # Block here when paused; unblocks on resume() or cancel()
+                run._pause_event.wait()
+                if run._cancel_event.is_set():
+                    break
 
-            run.status = SimulationStatus.COMPLETED
-            logger.info("Simulation %s completed: %d frames", run.id, len(run.frames))
+            if not run._cancel_event.is_set():
+                run.status = SimulationStatus.COMPLETED
+                logger.info("Simulation %s completed: %d frames", run.id, len(run.frames))
+            else:
+                logger.info("Simulation %s cancelled after %d frames", run.id, len(run.frames))
 
         except Exception as e:
             run.status = SimulationStatus.FAILED
