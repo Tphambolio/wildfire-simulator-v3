@@ -65,8 +65,9 @@ class SimulationCreate(BaseModel):
         default=False,
         description=(
             "Force cellular automaton spread model. When True and no fuel_grid_path "
-            "is supplied, a synthetic mixed-fuel landscape is generated around the "
-            "ignition point for demo/testing purposes."
+            "is supplied, loads the real fuel grid from the FIRESIM_FUEL_GRID_PATH "
+            "environment variable if set; otherwise generates a synthetic mixed-fuel "
+            "landscape around the ignition point for demo/testing purposes."
         ),
     )
 

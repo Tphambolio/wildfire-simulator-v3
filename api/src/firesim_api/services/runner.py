@@ -7,6 +7,7 @@ Simulations run in background threads and stream frames via callbacks.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import uuid
 from typing import Callable
@@ -234,21 +235,42 @@ class SimulationRunner:
                 getattr(params, "wui_zones_path", None),
             )
 
-            # Synthetic CA mode: generate a grid when no real data is available
+            # CA mode: load real grid from settings env var, fall back to synthetic
             if fuel_grid is None and getattr(params, "use_ca_mode", False):
-                from firesim.data.synthetic_grid import generate_synthetic_fuel_grid
+                from firesim_api.settings import settings
 
-                fuel_grid = generate_synthetic_fuel_grid(
-                    ignition_lat=params.ignition_lat,
-                    ignition_lng=params.ignition_lng,
-                    radius_km=5.0,
-                    cell_size_m=50.0,
-                )
-                logger.info(
-                    "Synthetic CA grid generated: %dx%d around (%.4f, %.4f)",
-                    fuel_grid.rows, fuel_grid.cols,
-                    params.ignition_lat, params.ignition_lng,
-                )
+                default_fuel_path = settings.fuel_grid_path
+                if default_fuel_path and os.path.exists(default_fuel_path):
+                    logger.info("CA mode: loading real fuel grid from %s", default_fuel_path)
+                    real_grid, real_wui = self._load_grids(
+                        default_fuel_path,
+                        params.water_path or settings.water_path,
+                        params.buildings_path or settings.buildings_path,
+                        getattr(params, "wui_zones_path", None),
+                    )
+                    fuel_grid = real_grid
+                    if real_wui is not None and spread_modifier_grid is None:
+                        spread_modifier_grid = real_wui
+                    logger.info(
+                        "Real CA grid loaded: %dx%d (%.4f-%.4fN, %.4f-%.4fE)",
+                        fuel_grid.rows, fuel_grid.cols,
+                        fuel_grid.lat_min, fuel_grid.lat_max,
+                        fuel_grid.lng_min, fuel_grid.lng_max,
+                    )
+                else:
+                    from firesim.data.synthetic_grid import generate_synthetic_fuel_grid
+
+                    fuel_grid = generate_synthetic_fuel_grid(
+                        ignition_lat=params.ignition_lat,
+                        ignition_lng=params.ignition_lng,
+                        radius_km=5.0,
+                        cell_size_m=50.0,
+                    )
+                    logger.info(
+                        "Synthetic CA grid generated: %dx%d around (%.4f, %.4f)",
+                        fuel_grid.rows, fuel_grid.cols,
+                        params.ignition_lat, params.ignition_lng,
+                    )
 
             simulator = Simulator(
                 config,
