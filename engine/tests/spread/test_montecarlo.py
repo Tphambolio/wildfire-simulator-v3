@@ -219,3 +219,56 @@ class TestGridMetadata:
     def test_rows_cols_positive(self, result_5iter):
         assert result_5iter.rows > 0
         assert result_5iter.cols > 0
+
+
+# ---------------------------------------------------------------------------
+# Weather variation is actually applied
+# ---------------------------------------------------------------------------
+
+
+class TestWeatherVariation:
+    def test_rh_variation_changes_result(self, small_grid, moderate_conditions):
+        """rh_abs > 0 should produce different results than rh_abs = 0.
+
+        Before the fix, rh_delta was computed but never applied to FFMC,
+        so both configs would produce identical outputs (only wind varied).
+        With the fix, FFMC is perturbed per iteration, yielding divergent results.
+        """
+        base_cfg = dict(
+            ignition_lat=53.55,
+            ignition_lng=-113.50,
+            duration_hours=0.5,
+            n_iterations=10,
+            jitter_m=0.0,          # No ignition jitter
+            wind_speed_pct=0.0,    # No wind variation — isolate RH effect
+            base_seed=42,
+        )
+        no_rh = run_monte_carlo(
+            MonteCarloConfig(**base_cfg, rh_abs=0.0),
+            small_grid, moderate_conditions,
+        )
+        with_rh = run_monte_carlo(
+            MonteCarloConfig(**base_cfg, rh_abs=15.0),
+            small_grid, moderate_conditions,
+        )
+        # With no variation at all every iteration is identical → same result.
+        # With large RH variation the per-iteration FFMC differs → different result.
+        assert no_rh.burn_probability != with_rh.burn_probability, (
+            "RH variation had no effect — rh_delta is likely not applied to FFMC"
+        )
+
+    def test_rh_variation_is_deterministic_with_fixed_seed(self, small_grid, moderate_conditions):
+        """RH variation result is reproducible with the same seed."""
+        cfg = MonteCarloConfig(
+            ignition_lat=53.55,
+            ignition_lng=-113.50,
+            duration_hours=0.5,
+            n_iterations=5,
+            jitter_m=0.0,
+            wind_speed_pct=0.0,
+            rh_abs=10.0,
+            base_seed=77,
+        )
+        r1 = run_monte_carlo(cfg, small_grid, moderate_conditions)
+        r2 = run_monte_carlo(cfg, small_grid, moderate_conditions)
+        assert r1.burn_probability == r2.burn_probability

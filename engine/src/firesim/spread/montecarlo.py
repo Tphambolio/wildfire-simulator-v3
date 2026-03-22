@@ -117,12 +117,19 @@ def run_monte_carlo(
                                        mc_config.wind_speed_pct / 100.0)
         wind_speed = max(0.0, base_conditions.wind_speed * ws_factor)
 
+        # RH variation → FFMC perturbation.
+        # FFMC sensitivity to RH is approximately −0.35 FFMC units per 1 % RH
+        # (empirical from Van Wagner & Pickett 1985 equilibrium moisture equations
+        # at typical mid-season conditions: T≈20°C, RH 50–70%, FFMC 80–90).
+        # A positive rh_delta (higher RH) drives FFMC down, and vice versa.
+        _FFMC_PER_RH = 0.35
         rh_delta = rng.uniform(-mc_config.rh_abs, mc_config.rh_abs)
+        ffmc_varied = max(0.0, min(101.0, base_conditions.ffmc - rh_delta * _FFMC_PER_RH))
 
         iter_conditions = SpreadConditions(
             wind_speed=wind_speed,
             wind_direction=base_conditions.wind_direction,
-            ffmc=base_conditions.ffmc,
+            ffmc=ffmc_varied,
             dmc=base_conditions.dmc,
             dc=base_conditions.dc,
             pc=base_conditions.pc,
