@@ -46,16 +46,16 @@ docker compose up --build
 ## Testing
 
 ```bash
-make test           # All 386 tests
-make test-engine    # 369 engine tests
-make test-api       # 17 API integration tests
+make test           # All 501 tests
+make test-engine    # 434 engine tests
+make test-api       # 67 API integration tests
 ```
 
 ## Project structure
 
 ```
-engine/     Pure Python fire science (zero web deps, 369 tests)
-api/        FastAPI backend with WebSocket streaming (17 tests)
+engine/     Pure Python fire science (zero web deps, 434 tests)
+api/        FastAPI backend with WebSocket streaming (67 tests)
 frontend/   React + Vite + TypeScript + MapLibre GL
 ```
 
@@ -66,6 +66,11 @@ POST /api/v1/simulations          Start a simulation
 GET  /api/v1/simulations/{id}     Get status and results
 WS   /api/v1/simulations/ws/{id}  Stream frames in real-time
 GET  /api/v1/health               Health check
+
+POST /api/v1/fwi/calculate        Compute FWI from noon weather observation
+POST /api/v1/fwi/multi-day        Chain FWI across daily observations
+
+GET  /api/v1/weather              Live FWI indices for a location (CWFIS)
 ```
 
 ## References

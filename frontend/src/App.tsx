@@ -7,7 +7,7 @@ import FireMetrics from "./components/FireMetrics";
 import TimeSlider from "./components/TimeSlider";
 import { useSimulation } from "./hooks/useSimulation";
 import { computeBurnProbability } from "./services/api";
-import type { SimulationCreate, SimulationFrame, BurnProbabilityResponse } from "./types/simulation";
+import type { SimulationCreate, SimulationFrame, BurnProbabilityRequest, BurnProbabilityResponse } from "./types/simulation";
 
 function exportPerimeterGeoJSON(
   frames: SimulationFrame[],
@@ -101,7 +101,7 @@ export default function App() {
   );
 
   const handleComputeBurnProbability = useCallback(
-    async (params: import("./types/simulation").BurnProbabilityRequest) => {
+    async (params: BurnProbabilityRequest) => {
       setBurnProbRunning(true);
       setBurnProbError(null);
       setBurnProbabilityData(null);

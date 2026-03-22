@@ -10,10 +10,11 @@ FireSim V3 simulates wildfire spread using the Canadian FBP System. It is a rese
 engine/          Pure Python fire science (zero web deps)
   fbp/           FBP calculator, constants (18 fuel types), crown fire, JIT
   fwi/           FWI calculator (FFMC, DMC, DC, ISI, BUI, FWI)
-  spread/        Huygens wavelet simulator, ellipse geometry, slope, perimeter
+  spread/        Huygens wavelet simulator, ellipse geometry, slope, perimeter, CA model
+  data/          Fuel loaders, WUI loader, synthetic fuel grid (for CA demo)
 
 api/             FastAPI backend
-  routers/       HTTP + WebSocket endpoints
+  routers/       HTTP + WebSocket endpoints (simulations, fwi, weather)
   services/      SimulationRunner (background threads)
   schemas/       Pydantic request/response models
 
@@ -55,7 +56,6 @@ This eliminates grid artifacts that plague cellular automaton approaches.
 ## What this is NOT
 
 - Not a production fire management tool
-- No real-time weather integration (weather is user-specified)
-- No fuel raster data (uses uniform fuel type per simulation)
-- No WUI analysis, ember transport, or multi-fire interaction
+- No fuel raster data (uniform fuel type per simulation, or synthetic CA grid)
+- No multi-fire interaction
 - No authentication or multi-tenancy
