@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -127,20 +128,42 @@ async def simulation_websocket(websocket: WebSocket, sim_id: str) -> None:
                 "error": run.error,
             })
 
-        # Keep connection alive to receive new frames
-        while run.status == SimulationStatus.RUNNING:
+        # Keep connection alive; process control messages and wait for terminal state
+        while run.status in (SimulationStatus.RUNNING, SimulationStatus.PAUSED):
             try:
-                # Wait for client messages (ping/pong, close)
-                await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                msg_text = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                try:
+                    msg = json.loads(msg_text)
+                    action = msg.get("action")
+                    if action == "pause":
+                        run.pause()
+                        await websocket.send_json({"type": "status", "state": "paused"})
+                    elif action == "resume":
+                        run.resume()
+                        await websocket.send_json({"type": "status", "state": "running"})
+                    elif action == "cancel":
+                        run.cancel()
+                        await websocket.send_json({"type": "status", "state": "cancelled"})
+                except (json.JSONDecodeError, AttributeError):
+                    pass
             except asyncio.TimeoutError:
                 continue
 
-        # Send final completion event
+        # Send final event based on terminal state
         if run.status == SimulationStatus.COMPLETED:
             await websocket.send_json({
                 "type": "simulation.completed",
                 "simulation_id": sim_id,
             })
+        elif run.status == SimulationStatus.CANCELLED:
+            # Status already sent on cancel action; send final frame if available
+            frames = run.get_frames()
+            if frames:
+                await websocket.send_json({
+                    "type": "simulation.frame",
+                    "simulation_id": sim_id,
+                    "frame": _frame_to_schema(frames[-1]).model_dump(),
+                })
 
     except WebSocketDisconnect:
         pass

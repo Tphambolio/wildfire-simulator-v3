@@ -42,7 +42,7 @@ export interface SimulationFrame {
   burned_cells?: Array<{ lat: number; lng: number; intensity: number; fuel: string }> | null;
 }
 
-export type SimulationStatus = "pending" | "running" | "completed" | "failed";
+export type SimulationStatus = "pending" | "running" | "paused" | "completed" | "cancelled" | "failed";
 
 export interface SimulationResponse {
   simulation_id: string;
@@ -53,10 +53,11 @@ export interface SimulationResponse {
 }
 
 export interface WSEvent {
-  type: "simulation.frame" | "simulation.completed" | "simulation.error";
-  simulation_id: string;
+  type: "simulation.frame" | "simulation.completed" | "simulation.error" | "status";
+  simulation_id?: string;
   frame?: SimulationFrame;
   error?: string;
+  state?: "running" | "paused" | "cancelled";
 }
 
 export const FUEL_TYPES: Record<string, string> = {
