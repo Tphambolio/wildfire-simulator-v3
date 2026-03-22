@@ -36,7 +36,7 @@ export default function FireMetrics({ frame, status, totalFrames }: FireMetricsP
   }
 
   const intensity = classifyIntensity(frame.max_hfi_kw_m);
-  const isCAMode = !!(frame.burned_cells && frame.burned_cells.length > 0);
+  const isCAMode = Array.isArray(frame.burned_cells);
 
   return (
     <div className="panel metrics-panel">
