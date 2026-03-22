@@ -121,73 +121,97 @@ class SimulationRunner:
         water_path: str | None,
         buildings_path: str | None,
         wui_path: str | None,
+        dem_path: str | None = None,
     ) -> tuple:
-        """Load fuel grid and WUI modifiers, caching by path combo.
+        """Load fuel grid, WUI modifiers, and terrain grid, caching by path combo.
 
         Grids are purely spatial — independent of weather/FWI/ignition point,
         so they're safe to reuse across simulations.
-        """
-        if not fuel_path:
-            return None, None
 
-        cache_key = (fuel_path, water_path, buildings_path, wui_path)
+        Returns:
+            (fuel_grid, spread_modifier_grid, terrain_grid) — any may be None.
+        """
+        if not fuel_path and not dem_path:
+            return None, None, None
+
+        cache_key = (fuel_path, water_path, buildings_path, wui_path, dem_path)
 
         with self._grid_cache_lock:
             if cache_key in self._grid_cache:
-                cached_fuel, _ = self._grid_cache[cache_key]
+                cached = self._grid_cache[cache_key]
+                cached_fuel = cached[0]
                 if cached_fuel is not None:
                     logger.info(
                         "Grid cache HIT: %s — serving %dx%d grid from cache",
                         fuel_path, cached_fuel.rows, cached_fuel.cols,
                     )
                 else:
-                    logger.info("Grid cache HIT: %s (no grid loaded)", fuel_path)
-                return self._grid_cache[cache_key]
+                    logger.info("Grid cache HIT (dem-only or empty)")
+                return cached
 
-        logger.info("Grid cache MISS: loading %s", fuel_path)
+        logger.info("Grid cache MISS: loading fuel=%s dem=%s", fuel_path, dem_path)
 
-        # Load outside lock (slow operation, don't block other threads)
-        from firesim.data.fuel_loader import load_fuel_grid
-
-        try:
-            fuel_grid = load_fuel_grid(
-                fuel_path,
-                water_path=water_path,
-                buildings_path=buildings_path,
-            )
-        except FileNotFoundError:
-            logger.error("Fuel grid file not found: %s", fuel_path)
-            raise
-        except ValueError as exc:
-            logger.error("Fuel grid rejected (%s): %s", fuel_path, exc)
-            raise
-        except Exception as exc:
-            logger.error(
-                "Failed to load fuel grid from %s: %s — "
-                "file may be corrupt or in an unsupported format",
-                fuel_path, exc,
-            )
-            raise
-
+        fuel_grid = None
         spread_modifier_grid = None
-        if wui_path:
-            from firesim.data.wui_loader import load_wui_modifiers
+        terrain_grid = None
 
-            spread_modifier_grid = load_wui_modifiers(
-                wui_path,
-                bounds=(fuel_grid.lat_min, fuel_grid.lat_max,
-                        fuel_grid.lng_min, fuel_grid.lng_max),
-                rows=fuel_grid.rows,
-                cols=fuel_grid.cols,
-            )
+        if fuel_path:
+            from firesim.data.fuel_loader import load_fuel_grid
 
-        result = (fuel_grid, spread_modifier_grid)
+            try:
+                fuel_grid = load_fuel_grid(
+                    fuel_path,
+                    water_path=water_path,
+                    buildings_path=buildings_path,
+                )
+            except FileNotFoundError:
+                logger.error("Fuel grid file not found: %s", fuel_path)
+                raise
+            except ValueError as exc:
+                logger.error("Fuel grid rejected (%s): %s", fuel_path, exc)
+                raise
+            except Exception as exc:
+                logger.error(
+                    "Failed to load fuel grid from %s: %s — "
+                    "file may be corrupt or in an unsupported format",
+                    fuel_path, exc,
+                )
+                raise
+
+            if wui_path:
+                from firesim.data.wui_loader import load_wui_modifiers
+
+                spread_modifier_grid = load_wui_modifiers(
+                    wui_path,
+                    bounds=(fuel_grid.lat_min, fuel_grid.lat_max,
+                            fuel_grid.lng_min, fuel_grid.lng_max),
+                    rows=fuel_grid.rows,
+                    cols=fuel_grid.cols,
+                )
+
+        if dem_path:
+            from firesim.data.dem_loader import load_terrain_grid
+
+            try:
+                terrain_grid = load_terrain_grid(dem_path)
+                logger.info(
+                    "DEM loaded: %dx%d terrain grid for slope-adjusted spread",
+                    terrain_grid.rows, terrain_grid.cols,
+                )
+            except FileNotFoundError:
+                logger.error("DEM file not found: %s", dem_path)
+                raise
+            except Exception as exc:
+                logger.error("Failed to load DEM from %s: %s", dem_path, exc)
+                raise
+
+        result = (fuel_grid, spread_modifier_grid, terrain_grid)
 
         with self._grid_cache_lock:
             self._grid_cache[cache_key] = result
             logger.info(
-                "Grid cache STORE: %s — %dx%d grid, wui=%s",
-                fuel_path, fuel_grid.rows, fuel_grid.cols, wui_path is not None,
+                "Grid cache STORE: fuel=%s dem=%s wui=%s",
+                fuel_path is not None, dem_path is not None, wui_path is not None,
             )
 
         return result
@@ -227,30 +251,37 @@ class SimulationRunner:
                 dc=fwi.dc if fwi else 200.0,
             )
 
+            from firesim_api.settings import settings
+
+            # Resolve DEM path: per-request overrides env-var default
+            dem_path = getattr(params, "dem_path", None) or settings.dem_path
+
             # Load spatial grids (cached — only loads once per unique path combo)
-            fuel_grid, spread_modifier_grid = self._load_grids(
+            fuel_grid, spread_modifier_grid, terrain_grid = self._load_grids(
                 params.fuel_grid_path,
                 params.water_path,
                 params.buildings_path,
                 getattr(params, "wui_zones_path", None),
+                dem_path,
             )
 
             # CA mode: load real grid from settings env var, fall back to synthetic
             if fuel_grid is None and getattr(params, "use_ca_mode", False):
-                from firesim_api.settings import settings
-
                 default_fuel_path = settings.fuel_grid_path
                 if default_fuel_path and os.path.exists(default_fuel_path):
                     logger.info("CA mode: loading real fuel grid from %s", default_fuel_path)
-                    real_grid, real_wui = self._load_grids(
+                    real_grid, real_wui, real_terrain = self._load_grids(
                         default_fuel_path,
                         params.water_path or settings.water_path,
                         params.buildings_path or settings.buildings_path,
                         getattr(params, "wui_zones_path", None),
+                        dem_path,
                     )
                     fuel_grid = real_grid
                     if real_wui is not None and spread_modifier_grid is None:
                         spread_modifier_grid = real_wui
+                    if real_terrain is not None and terrain_grid is None:
+                        terrain_grid = real_terrain
                     logger.info(
                         "Real CA grid loaded: %dx%d (%.4f-%.4fN, %.4f-%.4fE)",
                         fuel_grid.rows, fuel_grid.cols,
@@ -275,6 +306,7 @@ class SimulationRunner:
             simulator = Simulator(
                 config,
                 fuel_grid=fuel_grid,
+                terrain_grid=terrain_grid,
                 default_fuel=fuel_type,
                 spread_modifier_grid=spread_modifier_grid,
             )

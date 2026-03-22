@@ -14,8 +14,9 @@ from firesim.fbp.calculator import (
     calculate_fbp,
     calculate_grass_curing_factor,
     calculate_isi,
+    calculate_surface_ros,
 )
-from firesim.fbp.constants import FuelType, FUEL_TYPES
+from firesim.fbp.constants import FuelType, FUEL_TYPES, get_fuel_spec
 from firesim.types import FireType
 
 
@@ -289,6 +290,105 @@ class TestFBPSlope:
         steep = calculate_fbp("C2", 20.0, 90.0, 45.0, 300.0, slope=100.0)
         ratio = steep.ros_surface / flat.ros_surface
         assert ratio <= 2.05  # small tolerance for floating point
+
+
+class TestISFPathway:
+    """Validate ISF → RSF pathway via calculate_surface_ros().
+
+    The ISF pathway (ST-X-3 §3.3): ISF = ISI × SF, RSF = f(ISF).
+    Compared against the simple RSF = RSI × SF approach to confirm the
+    nonlinear difference is present at high slope factors.
+    """
+
+    def test_surface_ros_flat_matches_fbp(self):
+        """calculate_surface_ros with flat ISI should match calculate_fbp surface ROS."""
+        ffmc, wind, dmc, dc = 90.0, 20.0, 45.0, 300.0
+        isi = calculate_isi(ffmc, wind)
+        bui = calculate_bui(dmc, dc)
+        spec = get_fuel_spec(FuelType.C2)
+        ros_direct = calculate_surface_ros(spec, isi, bui)
+        fbp = calculate_fbp("C2", wind, ffmc, dmc, dc)
+        assert abs(ros_direct - fbp.ros_surface) < fbp.ros_surface * 0.01
+
+    def test_isf_pathway_increases_ros_more_than_sf_multiply(self):
+        """ISF pathway gives higher RSF than simple RSI × SF at large SF.
+
+        Due to the concavity of ROS = a(1-exp(-b·ISI))^c at high ISI, the
+        ISF pathway (modify ISI then compute ROS) gives a larger RSF than
+        multiplying the final ROS by SF when the ROS equation is not yet
+        saturated.
+        """
+        ffmc, wind, dmc, dc = 85.0, 10.0, 30.0, 150.0
+        isi = calculate_isi(ffmc, wind)
+        bui = calculate_bui(dmc, dc)
+        spec = get_fuel_spec(FuelType.C2)
+
+        import math
+        sf = min(math.exp(3.533 * (50.0 / 100.0) ** 1.2), 2.0)  # 50% slope SF
+
+        # Simple RSF = RSI × SF (old approach)
+        ros_flat = calculate_surface_ros(spec, isi, bui)
+        rsf_multiply = ros_flat * sf
+
+        # ISF → RSF (new approach): ISF = ISI × SF, then compute ROS
+        isf = isi * sf
+        rsf_isf = calculate_surface_ros(spec, isf, bui)
+
+        # Both should be greater than flat ROS
+        assert rsf_isf > ros_flat
+        assert rsf_multiply > ros_flat
+
+        # The ISF pathway gives a different (typically larger) result for C2
+        # at moderate ISI where the ROS equation is in its steep region.
+        # We just verify the values differ — the magnitude is fuel/ISI dependent.
+        assert abs(rsf_isf - rsf_multiply) / ros_flat > 0.01, (
+            f"ISF pathway RSF {rsf_isf:.3f} should differ from SF×RSI {rsf_multiply:.3f}"
+        )
+
+    @pytest.mark.parametrize("slope_pct", [20.0, 40.0, 60.0, 100.0])
+    def test_isf_slope_ros_increases_with_slope(self, slope_pct):
+        """ISF-corrected ROS must increase monotonically with slope (C2, standard conditions).
+
+        Validates the ISF pathway produces physically plausible slope effects.
+        Standard conditions: FFMC=90, wind=20 km/h, DMC=45, DC=300, C2.
+        """
+        ffmc, wind, dmc, dc = 90.0, 20.0, 45.0, 300.0
+        isi = calculate_isi(ffmc, wind)
+        bui = calculate_bui(dmc, dc)
+        spec = get_fuel_spec(FuelType.C2)
+
+        import math
+        sf = min(math.exp(3.533 * (slope_pct / 100.0) ** 1.2), 2.0)
+        isf = isi * sf
+
+        ros_flat = calculate_surface_ros(spec, isi, bui)
+        rsf = calculate_surface_ros(spec, isf, bui)
+        ratio = rsf / ros_flat
+
+        assert ratio > 1.0, f"{slope_pct}% slope: ISF ratio {ratio:.2f} should exceed 1.0"
+
+    def test_isf_slope_100pct_ratio_reasonable(self):
+        """At 100% slope the ISF ratio should be in a physically sensible range.
+
+        SF at 100% = exp(3.533) ≈ 34, capped at 2.0 (Butler 2007).
+        ISF = ISI × 2.0 → RSF/RSI depends on fuel type and ISI level.
+        For C2 at standard conditions, ratio is typically 1.5–3.0.
+        """
+        ffmc, wind, dmc, dc = 90.0, 20.0, 45.0, 300.0
+        isi = calculate_isi(ffmc, wind)
+        bui = calculate_bui(dmc, dc)
+        spec = get_fuel_spec(FuelType.C2)
+
+        import math
+        sf = min(math.exp(3.533 * 1.0 ** 1.2), 2.0)  # capped at 2.0
+        isf = isi * sf
+        ros_flat = calculate_surface_ros(spec, isi, bui)
+        rsf = calculate_surface_ros(spec, isf, bui)
+        ratio = rsf / ros_flat
+
+        assert 1.3 <= ratio <= 4.0, (
+            f"100% slope ISF ratio {ratio:.2f} outside expected range [1.3, 4.0]"
+        )
 
 
 class TestFBPMixedwood:

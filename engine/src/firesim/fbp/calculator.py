@@ -162,6 +162,33 @@ def _calculate_flame_length(hfi: float) -> float:
     return 0.0775 * hfi**0.46
 
 
+def calculate_surface_ros(
+    spec: FuelTypeSpec,
+    isi: float,
+    bui: float,
+    pc: float = 50.0,
+    grass_cure: float = 60.0,
+) -> float:
+    """Calculate surface rate of spread from ISI (or ISF for slope pathway).
+
+    Public wrapper around the internal surface ROS formula. Used by the
+    Huygens wavelet model to compute per-ray ROS via the ISF → RSF pathway:
+        ISF = ISI × SF_directional
+        RSF = calculate_surface_ros(spec, ISF, bui)
+
+    Args:
+        spec: Fuel type specification (from get_fuel_spec).
+        isi: Initial Spread Index (or slope-adjusted ISF) — dimensionless.
+        bui: Buildup Index — dimensionless.
+        pc: Percent conifer (0–100, M1/M2 types only).
+        grass_cure: Percent curing (0–100, O1a/O1b types only).
+
+    Returns:
+        Surface rate of spread (m/min). Non-negative.
+    """
+    return _calculate_surface_ros(spec, isi, bui, pc, grass_cure)
+
+
 def calculate_fbp(
     fuel_type: FuelType | str,
     wind_speed: float,

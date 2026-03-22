@@ -36,5 +36,15 @@ class Settings:
         """Default building footprints GeoJSON for non-fuel masking."""
         return os.environ.get("FIRESIM_BUILDINGS_PATH")
 
+    @property
+    def dem_path(self) -> str | None:
+        """Default DEM GeoTIFF for slope-adjusted fire spread.
+
+        When set, slope (%) and aspect (°) are derived per cell from this DEM
+        and applied via the CFFDRS ISF → RSF slope correction (ST-X-3 §3.3).
+        Per-request dem_path in SimulationCreate takes precedence over this.
+        """
+        return os.environ.get("FIRESIM_DEM_PATH")
+
 
 settings = Settings()

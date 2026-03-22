@@ -61,6 +61,15 @@ class SimulationCreate(BaseModel):
         default=None,
         description="Path to WUI zones GeoJSON with spread modifiers",
     )
+    dem_path: str | None = Field(
+        default=None,
+        description=(
+            "Path to Digital Elevation Model GeoTIFF for slope-adjusted spread. "
+            "When provided, slope (%) and aspect (°) are derived per cell from the "
+            "DEM and used in the CFFDRS ISF → RSF slope correction (ST-X-3 §3.3). "
+            "Overrides FIRESIM_DEM_PATH if set."
+        ),
+    )
     use_ca_mode: bool = Field(
         default=False,
         description=(
@@ -125,6 +134,10 @@ class BurnProbabilityRequest(BaseModel):
     fuel_grid_path: str | None = Field(default=None, description="Path to GeoTIFF fuel raster")
     water_path: str | None = Field(default=None, description="Path to water bodies GeoJSON")
     buildings_path: str | None = Field(default=None, description="Path to buildings GeoJSON")
+    dem_path: str | None = Field(
+        default=None,
+        description="Path to DEM GeoTIFF for slope-adjusted spread (CFFDRS ISF → RSF)",
+    )
 
 
 class BurnProbabilityResponse(BaseModel):

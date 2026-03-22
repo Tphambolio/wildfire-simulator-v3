@@ -22,8 +22,13 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from firesim.fbp.calculator import calculate_fbp
-from firesim.fbp.constants import FuelType
+from firesim.fbp.calculator import (
+    calculate_bui,
+    calculate_fbp,
+    calculate_isi,
+    calculate_surface_ros,
+)
+from firesim.fbp.constants import FuelType, get_fuel_spec
 from firesim.spread.ellipse import (
     calculate_back_ros,
     calculate_flank_ros,
@@ -205,19 +210,30 @@ def expand_vertex(
     Returns:
         List of new vertices forming the wavelet ellipse
     """
-    # Calculate FBP for this fuel type (no slope — we apply directional slope per ray)
+    # Pre-compute ISI/BUI and fuel spec once per vertex for ISF per-ray pathway
+    isi = calculate_isi(conditions.ffmc, conditions.wind_speed)
+    bui = calculate_bui(conditions.dmc, conditions.dc)
+    spec = get_fuel_spec(fuel_type)
+
+    # Flat-terrain surface ROS (denominator for ISF ratio — computed once)
+    ros_flat = calculate_surface_ros(spec, isi, bui, conditions.pc, conditions.grass_cure)
+
+    # Full FBP (flat terrain — slope applied per ray via ISF below)
     fbp = calculate_fbp(
         fuel_type=fuel_type,
         wind_speed=conditions.wind_speed,
         ffmc=conditions.ffmc,
         dmc=conditions.dmc,
         dc=conditions.dc,
-        slope=0.0,  # Slope applied directionally below
+        slope=0.0,
         pc=conditions.pc,
         grass_cure=conditions.grass_cure,
     )
 
-    head_ros = fbp.ros_final * ros_modifier  # m/min, modified by WUI zone
+    # Fire spread direction (opposite of meteorological wind FROM)
+    spread_dir = (conditions.wind_direction + 180.0) % 360.0
+
+    head_ros = fbp.ros_final * ros_modifier  # m/min, flat-terrain; ISF applied per ray
 
     if head_ros <= 0.001:
         return [vertex]  # No spread
@@ -227,8 +243,6 @@ def expand_vertex(
     back_ros = calculate_back_ros(head_ros, lbr)
     flank_ros = calculate_flank_ros(head_ros, lbr)
 
-    # Fire spread direction (opposite of meteorological wind FROM)
-    spread_dir = (conditions.wind_direction + 180.0) % 360.0
     spread_dir_rad = math.radians(spread_dir)
 
     # Coordinate conversion
@@ -266,9 +280,20 @@ def expand_vertex(
         else:
             ray_ros = a_ros * b_ros / denom
 
-        # Apply directional slope factor
-        sf = calculate_directional_slope_factor(slope_pct, aspect_deg, ray_deg)
-        ray_ros *= sf
+        # ISF → RSF per ray (ST-X-3 §3.3):
+        #   ISF = ISI × SF_directional  (slope-adjusted ISI for this ray)
+        #   RSF = surface_ros(ISF) / surface_ros(ISI) × ray_ros
+        # Using the ratio correctly captures the nonlinear ROS equation's
+        # response to ISI change, unlike a simple ray_ros × SF multiply.
+        sf_ray = calculate_directional_slope_factor(slope_pct, aspect_deg, ray_deg)
+        if ros_flat > 0.001:
+            isf_ray = isi * sf_ray
+            ros_isf_ray = calculate_surface_ros(
+                spec, isf_ray, bui, conditions.pc, conditions.grass_cure
+            )
+            ray_ros *= ros_isf_ray / ros_flat
+        else:
+            ray_ros *= sf_ray  # fallback when flat ROS is negligible (zero ISI)
 
         # Distance traveled in this timestep
         dist_m = ray_ros * dt_minutes
