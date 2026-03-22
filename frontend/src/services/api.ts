@@ -1,6 +1,6 @@
 /** API client for the FireSim backend. */
 
-import type { SimulationCreate, SimulationResponse, CurrentWeather } from "../types/simulation";
+import type { SimulationCreate, SimulationResponse, CurrentWeather, FWIResult } from "../types/simulation";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -38,6 +38,28 @@ export async function fetchCurrentWeather(
   );
   if (!resp.ok) {
     throw new Error(`Weather fetch failed: ${resp.statusText}`);
+  }
+  return resp.json();
+}
+
+export async function calculateFWI(params: {
+  temperature: number;
+  relative_humidity: number;
+  wind_speed: number;
+  precipitation_24h?: number;
+  month?: number;
+  ffmc_prev?: number;
+  dmc_prev?: number;
+  dc_prev?: number;
+}): Promise<FWIResult> {
+  const resp = await fetch(`${API_BASE}/api/v1/fwi/calculate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+    throw new Error(err.detail || "FWI calculation failed");
   }
   return resp.json();
 }

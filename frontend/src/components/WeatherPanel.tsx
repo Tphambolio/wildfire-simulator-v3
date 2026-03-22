@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { SimulationCreate, WeatherParams, FWIOverrides } from "../types/simulation";
 import { FUEL_TYPES } from "../types/simulation";
-import { fetchCurrentWeather } from "../services/api";
+import { fetchCurrentWeather, calculateFWI } from "../services/api";
 
 interface WeatherPanelProps {
   onStartSimulation: (params: SimulationCreate) => void;
@@ -38,6 +38,8 @@ export default function WeatherPanel({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherMessage, setWeatherMessage] = useState<string | null>(null);
+  const [fwiLoading, setFwiLoading] = useState(false);
+  const [computedFWI, setComputedFWI] = useState<{ isi: number; bui: number; fwi: number; danger_rating: string } | null>(null);
 
   const EDMONTON_FUEL_GRID_PATH =
     "/home/rpas/dev/wildfire/wildfire-self-learning/data/fuel_maps/Edmonton_FBP_FuelLayer_20251105_10m.tif";
@@ -88,6 +90,29 @@ export default function WeatherPanel({
       setWeatherMessage("Could not reach CWFIS — check network");
     } finally {
       setWeatherLoading(false);
+    }
+  };
+
+  const handleComputeFWI = async () => {
+    setFwiLoading(true);
+    setComputedFWI(null);
+    try {
+      const result = await calculateFWI({
+        temperature: weather.temperature,
+        relative_humidity: weather.relative_humidity,
+        wind_speed: weather.wind_speed,
+        precipitation_24h: weather.precipitation_24h,
+        ffmc_prev: fwi.ffmc ?? 85,
+        dmc_prev: fwi.dmc ?? 6,
+        dc_prev: fwi.dc ?? 15,
+      });
+      setFwi({ ffmc: result.ffmc, dmc: result.dmc, dc: result.dc });
+      setComputedFWI({ isi: result.isi, bui: result.bui, fwi: result.fwi, danger_rating: result.danger_rating });
+      if (!showAdvanced) setShowAdvanced(true);
+    } catch {
+      setComputedFWI(null);
+    } finally {
+      setFwiLoading(false);
     }
   };
 
@@ -296,6 +321,38 @@ export default function WeatherPanel({
               }
             />
           </label>
+
+          <button
+            className="toggle-advanced"
+            onClick={handleComputeFWI}
+            disabled={fwiLoading}
+            title="Compute today's FFMC/DMC/DC from the weather inputs above, using current sliders as yesterday's starting codes"
+            style={{ marginTop: "8px" }}
+          >
+            {fwiLoading ? "Computing..." : "Compute FWI from Weather"}
+          </button>
+
+          {computedFWI && (
+            <div style={{ marginTop: "8px", fontSize: "0.9em", lineHeight: "1.6" }}>
+              <span style={{ opacity: 0.7 }}>ISI </span><strong>{computedFWI.isi.toFixed(1)}</strong>
+              {"  "}
+              <span style={{ opacity: 0.7 }}>BUI </span><strong>{computedFWI.bui.toFixed(0)}</strong>
+              {"  "}
+              <span style={{ opacity: 0.7 }}>FWI </span><strong>{computedFWI.fwi.toFixed(1)}</strong>
+              {"  "}
+              <span style={{
+                padding: "1px 6px",
+                borderRadius: "3px",
+                fontSize: "0.85em",
+                background: computedFWI.fwi >= 30 ? "#b71c1c" :
+                            computedFWI.fwi >= 19 ? "#e65100" :
+                            computedFWI.fwi >= 10 ? "#f57f17" : "#2e7d32",
+                color: "#fff",
+              }}>
+                {computedFWI.danger_rating}
+              </span>
+            </div>
+          )}
         </div>
       )}
 

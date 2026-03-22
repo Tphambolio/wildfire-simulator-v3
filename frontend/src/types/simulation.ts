@@ -60,6 +60,16 @@ export interface WSEvent {
   state?: "running" | "paused" | "cancelled";
 }
 
+export interface FWIResult {
+  ffmc: number;
+  dmc: number;
+  dc: number;
+  isi: number;
+  bui: number;
+  fwi: number;
+  danger_rating: string;
+}
+
 export interface CurrentWeather {
   lat: number;
   lng: number;
