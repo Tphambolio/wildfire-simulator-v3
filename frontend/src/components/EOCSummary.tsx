@@ -9,6 +9,7 @@
 import type { SimulationFrame, BurnProbabilityResponse } from "../types/simulation";
 import type { RunParams } from "./WeatherPanel";
 import { buildGeoJSON, buildKML, downloadFile } from "../utils/geoExport";
+import type { EvacZone } from "../utils/evacZones";
 
 interface EOCSummaryProps {
   frames: SimulationFrame[];
@@ -23,6 +24,8 @@ interface EOCSummaryProps {
   overlayRoads?: GeoJSON.FeatureCollection | null;
   overlayCommunities?: GeoJSON.FeatureCollection | null;
   overlayInfrastructure?: GeoJSON.FeatureCollection | null;
+  /** ICS evacuation zones for export and ICS report */
+  evacZones?: EvacZone[];
 }
 
 // ── Geometry helpers ────────────────────────────────────────────────────────
@@ -129,7 +132,8 @@ function buildICSText(
   ignition: { lat: number; lng: number } | null,
   fuelTypeLabel?: string,
   atRiskCounts?: { roads: number; communities: number; infrastructure: number },
-  dayStats?: DayStats[] | null
+  dayStats?: DayStats[] | null,
+  evacZones?: EvacZone[]
 ): string {
   const now = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
   const lines: string[] = [
@@ -217,6 +221,23 @@ function buildICSText(
     lines.push("");
   }
 
+  if (evacZones && evacZones.length > 0) {
+    const n = sectionBase + (spread ? 1 : 0) + (burnArea ? 1 : 0) + (hasAtRisk ? 1 : 0);
+    lines.push(`${n}. ICS EVACUATION TRIGGER ZONES`);
+    lines.push("  Zone              Time Range   Area (ha)   Communities at Risk");
+    for (const z of evacZones) {
+      const zLabel = z.label.padEnd(17);
+      const zTime = z.timeRangeLabel.padEnd(12);
+      const zArea = z.areaHa.toFixed(0).padEnd(11);
+      const zComm = z.communitiesAtRisk.length > 0
+        ? z.communitiesAtRisk.slice(0, 3).join(", ") + (z.communitiesAtRisk.length > 3 ? ` +${z.communitiesAtRisk.length - 3} more` : "")
+        : "None identified";
+      lines.push(`  ${zLabel} ${zTime} ${zArea} ${zComm}`);
+    }
+    lines.push("  NOTE: Zone boundaries are modelled projections. Confirm with IC/Lookout.");
+    lines.push("");
+  }
+
   lines.push("─".repeat(60));
   lines.push("Prepared using CFFDRS FBP System (Forestry Canada ST-X-3, 1992)");
   lines.push("FireSim V3 | Albini 1979 spotfire | Van Wagner 1977 crown fire");
@@ -281,6 +302,7 @@ export default function EOCSummary({
   overlayRoads,
   overlayCommunities,
   overlayInfrastructure,
+  evacZones,
 }: EOCSummaryProps) {
   const spread = extractSpreadStats(frames);
   const burnArea = burnProbData ? extractBurnAreaStats(burnProbData) : null;
@@ -288,7 +310,7 @@ export default function EOCSummary({
 
   if (!spread && !burnArea && !runParams) return null;
 
-  const icsText = buildICSText(spread, burnArea, runParams, ignitionPoint, fuelTypeLabel, atRiskCounts, dayStats);
+  const icsText = buildICSText(spread, burnArea, runParams, ignitionPoint, fuelTypeLabel, atRiskCounts, dayStats, evacZones);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(icsText).catch(() => {
@@ -304,7 +326,7 @@ export default function EOCSummary({
 
   const handlePrint = () => window.print();
 
-  const exportOpts = { frames, burnProbData, runParams, ignitionPoint, fuelTypeLabel, overlayRoads, overlayCommunities, overlayInfrastructure };
+  const exportOpts = { frames, burnProbData, runParams, ignitionPoint, fuelTypeLabel, overlayRoads, overlayCommunities, overlayInfrastructure, evacZones };
   const timestamp = new Date().toISOString().slice(0, 10);
 
   const handleExportGeoJSON = () => {

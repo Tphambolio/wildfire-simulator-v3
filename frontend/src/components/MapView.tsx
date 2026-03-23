@@ -9,6 +9,8 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { SimulationFrame, BurnProbabilityResponse } from "../types/simulation";
+import type { EvacZone } from "../utils/evacZones";
+import { evacZonesToGeoJSON } from "../utils/evacZones";
 
 /** A simple non-modal toast — disappears after 3 s */
 function MapToast({ message, onDone }: { message: string; onDone: () => void }) {
@@ -168,6 +170,9 @@ interface MapViewProps {
   overlayCommunitiesVisible?: boolean;
   overlayInfrastructure?: GeoJSON.FeatureCollection | null;
   overlayInfrastructureVisible?: boolean;
+  /** ICS evacuation zones derived from simulation frames */
+  evacZones?: EvacZone[];
+  evacZonesVisible?: boolean;
 }
 
 export default function MapView({
@@ -184,6 +189,8 @@ export default function MapView({
   overlayCommunitiesVisible = true,
   overlayInfrastructure = null,
   overlayInfrastructureVisible = true,
+  evacZones = [],
+  evacZonesVisible = true,
 }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -546,6 +553,33 @@ export default function MapView({
     m.on("mouseenter", "overlay-infra-circle", () => { m.getCanvas().style.cursor = "pointer"; });
     m.on("mouseleave", "overlay-infra-circle", () => { m.getCanvas().style.cursor = ""; });
 
+    // ── Evacuation zone layers ─────────────────────────────────────────────
+    // Three zones rendered outermost→innermost so Order is on top.
+    for (const [zoneId, color] of [
+      ["evac-watch",  "#f9a825"],
+      ["evac-alert",  "#f57c00"],
+      ["evac-order",  "#d32f2f"],
+    ] as Array<[string, string]>) {
+      if (m.getSource(zoneId)) {
+        if (m.getLayer(`${zoneId}-fill`))    m.removeLayer(`${zoneId}-fill`);
+        if (m.getLayer(`${zoneId}-outline`)) m.removeLayer(`${zoneId}-outline`);
+        m.removeSource(zoneId);
+      }
+      m.addSource(zoneId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      m.addLayer({
+        id: `${zoneId}-fill`,
+        type: "fill",
+        source: zoneId,
+        paint: { "fill-color": color, "fill-opacity": 0.18 },
+      });
+      m.addLayer({
+        id: `${zoneId}-outline`,
+        type: "line",
+        source: zoneId,
+        paint: { "line-color": color, "line-width": 2.5, "line-opacity": 0.85, "line-dasharray": [4, 2] },
+      });
+    }
+
     // Click handler for community polygons
     m.on("click", "overlay-communities-fill", (e) => {
       if (!e.features || !e.features.length) return;
@@ -857,6 +891,47 @@ export default function MapView({
     setVis("overlay-infra-circle", overlayInfrastructureVisible);
   }, [overlayRoadsVisible, overlayCommunitiesVisible, overlayInfrastructureVisible, mapReady, fireLayersVersion]);
 
+  // Sync evacuation zone GeoJSON sources
+  useEffect(() => {
+    if (!map.current || !mapReady) return;
+    const m = map.current;
+    const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    const zoneMap: Record<string, string> = { Watch: "evac-watch", Alert: "evac-alert", Order: "evac-order" };
+    // Clear all first, then populate from props
+    for (const srcId of Object.values(zoneMap)) {
+      const src = m.getSource(srcId) as maplibregl.GeoJSONSource | undefined;
+      if (src) src.setData(empty);
+    }
+    if (evacZones && evacZones.length > 0) {
+      const fc = evacZonesToGeoJSON(evacZones);
+      for (const zone of evacZones) {
+        const srcId = zoneMap[zone.label];
+        if (!srcId) continue;
+        const src = m.getSource(srcId) as maplibregl.GeoJSONSource | undefined;
+        if (!src) continue;
+        const zoneFc: GeoJSON.FeatureCollection = {
+          type: "FeatureCollection",
+          features: fc.features.filter((f) => f.properties?.zone_label === zone.label),
+        };
+        src.setData(zoneFc);
+      }
+    }
+  }, [evacZones, mapReady, fireLayersVersion]);
+
+  // Evacuation zone visibility
+  useEffect(() => {
+    if (!map.current || !mapReady) return;
+    const m = map.current;
+    const vis = evacZonesVisible ? "visible" : "none";
+    for (const id of [
+      "evac-watch-fill", "evac-watch-outline",
+      "evac-alert-fill", "evac-alert-outline",
+      "evac-order-fill", "evac-order-outline",
+    ]) {
+      if (m.getLayer(id)) m.setLayoutProperty(id, "visibility", vis);
+    }
+  }, [evacZonesVisible, mapReady, fireLayersVersion]);
+
   const flyTo = useCallback((lat: number, lng: number, zoom = 12) => {
     map.current?.flyTo({ center: [lng, lat], zoom, duration: 1500 });
   }, []);
@@ -887,6 +962,24 @@ export default function MapView({
               </div>
             ))}
           </div>
+        </div>
+      )}
+      {/* Evacuation Zone Legend */}
+      {evacZones && evacZones.length > 0 && evacZonesVisible && (
+        <div className="evac-map-legend">
+          <div className="evac-map-legend-title">Evacuation Zones</div>
+          {[
+            { label: "Order (0–2 h)",  color: "#d32f2f" },
+            { label: "Alert (2–6 h)",  color: "#f57c00" },
+            { label: "Watch (6–12 h)", color: "#f9a825" },
+          ].filter(({ label }) =>
+            evacZones.some((z) => label.startsWith(z.label))
+          ).map(({ label, color }) => (
+            <div key={label} className="evac-map-legend-row">
+              <div className="evac-map-legend-swatch" style={{ background: color, opacity: 0.8 }} />
+              <span>{label}</span>
+            </div>
+          ))}
         </div>
       )}
       <div className="basemap-toggle">

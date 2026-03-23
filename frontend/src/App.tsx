@@ -10,11 +10,14 @@ import TimeSlider from "./components/TimeSlider";
 import OverlayPanel from "./components/OverlayPanel";
 import type { OverlayLayers, LayerType } from "./components/OverlayPanel";
 import ScenarioPanel from "./components/ScenarioPanel";
+import EvacZonesPanel from "./components/EvacZonesPanel";
 import { FUEL_TYPES } from "./types/simulation";
 import { useSimulation } from "./hooks/useSimulation";
 import { useScenarios } from "./hooks/useScenarios";
 import { computeBurnProbability } from "./services/api";
 import type { SimulationCreate, SimulationFrame, BurnProbabilityRequest, BurnProbabilityResponse, ScenarioConfig } from "./types/simulation";
+import { computeEvacZones } from "./utils/evacZones";
+import type { EvacZoneLabel } from "./utils/evacZones";
 
 /**
  * Export burn probability contour polygons as GeoJSON.
@@ -222,6 +225,10 @@ export default function App() {
   const [showBurnProbView, setShowBurnProbView] = useState(false);
   const [lastRunParams, setLastRunParams] = useState<RunParams | null>(null);
   const [overlayLayers, setOverlayLayers] = useState<OverlayLayers>(DEFAULT_OVERLAY_LAYERS);
+  const [evacZonesVisible, setEvacZonesVisible] = useState(true);
+  const [evacZoneScales, setEvacZoneScales] = useState<Record<EvacZoneLabel, number>>({
+    Order: 1, Alert: 1, Watch: 1,
+  });
 
   // ── Scenario management ───────────────────────────────────────────────────
   const { scenarios, saveScenario, deleteScenario, exportScenario, importScenario } = useScenarios();
@@ -246,6 +253,10 @@ export default function App() {
     communities: overlayAnnotated.communities.count,
     infrastructure: overlayAnnotated.infrastructure.count,
   }), [overlayAnnotated]);
+
+  const handleEvacScaleChange = useCallback((label: EvacZoneLabel, scale: number) => {
+    setEvacZoneScales((prev) => ({ ...prev, [label]: scale }));
+  }, []);
 
   const handleOverlayLoad = useCallback((type: LayerType, data: GeoJSON.FeatureCollection) => {
     setOverlayLayers((prev) => ({ ...prev, [type]: { ...prev[type], data } }));
@@ -274,6 +285,12 @@ export default function App() {
     cancelSimulation,
     error,
   } = useSimulation();
+
+  // Compute evac zones from simulation frames (updates live as frames arrive)
+  const evacZones = useMemo(
+    () => computeEvacZones(frames, overlayLayers.communities.data, evacZoneScales),
+    [frames, overlayLayers.communities.data, evacZoneScales],
+  );
 
   const handleMapClick = useCallback((lat: number, lng: number) => {
     setIgnitionPoint({ lat, lng });
@@ -449,6 +466,7 @@ export default function App() {
             overlayRoads={overlayAnnotated.roads.annotated as GeoJSON.FeatureCollection | null}
             overlayCommunities={overlayAnnotated.communities.annotated as GeoJSON.FeatureCollection | null}
             overlayInfrastructure={overlayAnnotated.infrastructure.annotated as GeoJSON.FeatureCollection | null}
+            evacZones={evacZones}
           />
           <OverlayPanel
             layers={overlayLayers}
@@ -456,6 +474,13 @@ export default function App() {
             onLayerLoad={handleOverlayLoad}
             onLayerToggle={handleOverlayToggle}
             onLayerClear={handleOverlayClear}
+          />
+          <EvacZonesPanel
+            zones={evacZones}
+            visible={evacZonesVisible}
+            scales={evacZoneScales}
+            onToggleVisible={setEvacZonesVisible}
+            onScaleChange={handleEvacScaleChange}
           />
           <ScenarioPanel
             scenarios={scenarios}
@@ -501,6 +526,8 @@ export default function App() {
             overlayCommunitiesVisible={overlayLayers.communities.visible}
             overlayInfrastructure={overlayAnnotated.infrastructure.annotated as GeoJSON.FeatureCollection | null}
             overlayInfrastructureVisible={overlayLayers.infrastructure.visible}
+            evacZones={evacZones}
+            evacZonesVisible={evacZonesVisible}
           />
           <TimeSlider
             frames={frames}

@@ -7,6 +7,8 @@
 
 import type { SimulationFrame, BurnProbabilityResponse } from "../types/simulation";
 import type { RunParams } from "../components/WeatherPanel";
+import type { EvacZone } from "./evacZones";
+import { evacZonesToGeoJSON } from "./evacZones";
 
 // ── Geometry helpers ────────────────────────────────────────────────────────
 
@@ -39,6 +41,8 @@ export interface ExportOptions {
   overlayRoads?: GeoJSON.FeatureCollection | null;
   overlayCommunities?: GeoJSON.FeatureCollection | null;
   overlayInfrastructure?: GeoJSON.FeatureCollection | null;
+  /** ICS evacuation zones (Order / Alert / Watch) */
+  evacZones?: EvacZone[];
 }
 
 function scenarioMeta(runParams: RunParams | null, fuelTypeLabel?: string): Record<string, unknown> {
@@ -207,6 +211,14 @@ export function buildGeoJSON(opts: ExportOptions): object {
     }
   }
 
+  // 6. Evacuation zones as named layers (Order / Alert / Watch)
+  if (opts.evacZones && opts.evacZones.length > 0) {
+    const zoneFc = evacZonesToGeoJSON(opts.evacZones);
+    for (const feat of zoneFc.features) {
+      features.push({ ...feat, properties: { ...feat.properties, layer: "evacuation_zone" } });
+    }
+  }
+
   return { type: "FeatureCollection", features };
 }
 
@@ -245,6 +257,18 @@ export function buildKML(opts: ExportOptions): string {
     '      <IconStyle><color>ff00ffff</color><scale>0.8</scale>',
     '        <Icon><href>http://maps.google.com/mapfiles/kml/paddle/ylw-circle.png</href></Icon>',
     '      </IconStyle>',
+    '    </Style>',
+    '    <Style id="style_evac_order">',
+    '      <LineStyle><color>ff2f2fd3</color><width>2</width></LineStyle>',
+    '      <PolyStyle><color>302f2fd3</color><fill>1</fill><outline>1</outline></PolyStyle>',
+    '    </Style>',
+    '    <Style id="style_evac_alert">',
+    '      <LineStyle><color>ff007cf5</color><width>2</width></LineStyle>',
+    '      <PolyStyle><color>30007cf5</color><fill>1</fill><outline>1</outline></PolyStyle>',
+    '    </Style>',
+    '    <Style id="style_evac_watch">',
+    '      <LineStyle><color>ff25a8f9</color><width>2</width></LineStyle>',
+    '      <PolyStyle><color>3025a8f9</color><fill>1</fill><outline>1</outline></PolyStyle>',
     '    </Style>',
   ];
 
@@ -336,6 +360,32 @@ export function buildKML(opts: ExportOptions): string {
   if (spotPlacemarks.length > 0) {
     lines.push('    <Folder><name>Spot Fires</name>');
     lines.push(...spotPlacemarks);
+    lines.push('    </Folder>');
+  }
+
+  // Evacuation zones
+  if (opts.evacZones && opts.evacZones.length > 0) {
+    lines.push('    <Folder><name>Evacuation Zones</name>');
+    for (const zone of opts.evacZones) {
+      if (zone.perimeter.length < 3) continue;
+      const coordStr = zone.perimeter
+        .map(([lat, lng]) => `${lng},${lat},0`)
+        .join(" ");
+      const styleId = `style_evac_${zone.label.toLowerCase()}`;
+      const commStr = zone.communitiesAtRisk.length > 0
+        ? ` | Communities: ${zone.communitiesAtRisk.join(", ")}`
+        : "";
+      lines.push('      <Placemark>');
+      lines.push(`        <name>Evacuation ${zone.label} (${zone.timeRangeLabel})</name>`);
+      lines.push(`        <styleUrl>#${styleId}</styleUrl>`);
+      lines.push(`        <description>${escapeXml(
+        `Zone: ${zone.label} | Time range: ${zone.timeRangeLabel} | Area: ${zone.areaHa.toFixed(0)} ha${commStr}`
+      )}</description>`);
+      lines.push('        <Polygon><outerBoundaryIs><LinearRing>');
+      lines.push(`          <coordinates>${coordStr}</coordinates>`);
+      lines.push('        </LinearRing></outerBoundaryIs></Polygon>');
+      lines.push('      </Placemark>');
+    }
     lines.push('    </Folder>');
   }
 
