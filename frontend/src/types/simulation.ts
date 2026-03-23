@@ -28,6 +28,8 @@ export interface SimulationCreate {
   wui_zones_path?: string | null;
   dem_path?: string | null;
   use_ca_mode?: boolean;
+  enable_spotting?: boolean;
+  spotting_intensity?: number;
 }
 
 export interface SimulationFrame {

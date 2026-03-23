@@ -53,6 +53,7 @@ def check_ember_spotting(
     default_fuel: FuelType,
     dt_minutes: float,
     check_interval: int = 4,
+    intensity_multiplier: float = 1.0,
 ) -> list[SpotFire]:
     """Check for ember spotting from the fire front.
 
@@ -108,10 +109,10 @@ def check_ember_spotting(
                 vertex.lat, vertex.lng
             )
 
-        # Spotting probability (scaled by timestep)
+        # Spotting probability (scaled by timestep and UI intensity multiplier)
         base_prob = min(MAX_SPOT_PROB, hfi / INTENSITY_REF_KW_M) * ember_mult
         # Scale probability by timestep (calibrated for 5-min steps)
-        spot_prob = base_prob * (dt_minutes / 5.0)
+        spot_prob = base_prob * (dt_minutes / 5.0) * max(0.0, intensity_multiplier)
 
         if random.random() > spot_prob:
             continue  # No spot fire this timestep

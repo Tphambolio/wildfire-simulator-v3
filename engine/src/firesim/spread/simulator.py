@@ -60,6 +60,8 @@ class Simulator:
         num_rays: int = 36,
         spread_modifier_grid: SpreadModifierGrid | None = None,
         initial_front: list[FireVertex] | None = None,
+        enable_spotting: bool = False,
+        spotting_intensity: float = 1.0,
     ):
         """Initialize simulator.
 
@@ -82,6 +84,8 @@ class Simulator:
         self.num_rays = num_rays
         self.spread_modifier_grid = spread_modifier_grid
         self.initial_front = initial_front
+        self.enable_spotting = enable_spotting
+        self.spotting_intensity = spotting_intensity
 
     def run(self) -> Generator[SimulationFrame, None, None]:
         """Run the simulation, yielding frames at snapshot intervals.
@@ -232,6 +236,8 @@ class Simulator:
             spread_modifier_grid=self.spread_modifier_grid,
             dt_minutes=1.0,
             snapshot_interval_minutes=config.snapshot_interval_minutes,
+            enable_spotting=self.enable_spotting,
+            spotting_intensity=self.spotting_intensity,
         )
 
         for cf in ca_frames:
@@ -250,6 +256,13 @@ class Simulator:
                 for c in cf.burned_cells
             ]
 
+            ca_spot_fires = None
+            if cf.spot_fires:
+                ca_spot_fires = [
+                    {"lat": s.lat, "lng": s.lng, "distance_m": s.distance_m, "hfi_kw_m": s.hfi_kw_m}
+                    for s in cf.spot_fires
+                ]
+
             yield SimulationFrame(
                 time_hours=cf.time_hours,
                 perimeter=perimeter,
@@ -259,7 +272,7 @@ class Simulator:
                 fire_type=FireType.SURFACE,
                 flame_length_m=0.0,
                 fuel_breakdown=cf.fuel_breakdown,
-                spot_fires=None,
+                spot_fires=ca_spot_fires,
                 num_fronts=1,
                 burned_cells=burned_data,
             )

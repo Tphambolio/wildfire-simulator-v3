@@ -22,8 +22,9 @@ from firesim.spread.ellipse import (
     calculate_flank_ros,
     calculate_length_to_breadth_ratio,
 )
-from firesim.spread.huygens import FuelGrid, SpreadConditions, SpreadModifierGrid, TerrainGrid
+from firesim.spread.huygens import FireVertex, FuelGrid, SpreadConditions, SpreadModifierGrid, TerrainGrid
 from firesim.spread.slope import calculate_directional_slope_factor
+from firesim.spread.spotting import SpotFire, check_ember_spotting
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class CellularFrame:
     max_intensity: float
     mean_ros: float
     fuel_breakdown: dict[str, float]
-    spot_fires: list[dict] | None = None
+    spot_fires: list[SpotFire] | None = None
     num_fronts: int = 1
 
 
@@ -77,6 +78,8 @@ def run_cellular_simulation(
     terrain_grid: TerrainGrid | None = None,
     dt_minutes: float = 1.0,
     snapshot_interval_minutes: float = 30.0,
+    enable_spotting: bool = False,
+    spotting_intensity: float = 1.0,
 ) -> list[CellularFrame]:
     """Run fire spread using cellular automaton on the fuel grid.
 
@@ -91,6 +94,10 @@ def run_cellular_simulation(
             is scaled by the directional slope factor.
         dt_minutes: Timestep in minutes.
         snapshot_interval_minutes: How often to yield frames.
+        enable_spotting: When True, apply Albini (1979) ember spotting model to seed
+            new ignitions from the active fire front at each timestep.
+        spotting_intensity: Multiplier on spot fire probability (1.0 = baseline;
+            0 = disabled). Has no effect when enable_spotting is False.
 
     Returns:
         List of CellularFrame snapshots.
@@ -169,6 +176,8 @@ def run_cellular_simulation(
     snapshot_burned_cells: list[BurnedCell] = []  # cells since last snapshot
     iteration = 0
     last_mean_ros = 0.0  # mean ROS of active burning cells at last timestep
+    all_spot_fires: list[SpotFire] = []
+    snapshot_spot_fires: list[SpotFire] = []
 
     # Fire spread direction (opposite of wind FROM)
     spread_dir = (conditions.wind_direction + 180.0) % 360.0
@@ -185,9 +194,11 @@ def run_cellular_simulation(
                 elapsed, all_burned_cells, snapshot_burned_cells,
                 rows, cols, cell_size_m, fuel_grid, burned,
                 mean_ros=last_mean_ros,
+                spot_fires=list(snapshot_spot_fires) if snapshot_spot_fires else None,
             )
             frames.append(frame)
             snapshot_burned_cells = []  # reset for next interval
+            snapshot_spot_fires = []
             next_snapshot += snapshot_interval_minutes
 
         if not np.any(burning):
@@ -300,6 +311,32 @@ def run_cellular_simulation(
         burned |= exhausted
         burning[exhausted] = False
 
+        # Ember spotting: sample front cells and seed new ignitions
+        if enable_spotting and np.any(burning):
+            _apply_spotting(
+                burning=burning,
+                burned=burned,
+                new_burning=new_burning,
+                fuel_grid=fuel_grid,
+                conditions=conditions,
+                spread_modifier_grid=spread_modifier_grid,
+                default_fuel=default_fuel,
+                lat_max=lat_max,
+                lat_min=lat_min,
+                lng_min=lng_min,
+                cell_lat=cell_lat,
+                cell_lng=cell_lng,
+                rows=rows,
+                cols=cols,
+                dt_minutes=dt_minutes,
+                spotting_intensity=spotting_intensity,
+                all_spot_fires=all_spot_fires,
+                snapshot_spot_fires=snapshot_spot_fires,
+                all_burned_cells=all_burned_cells,
+                snapshot_burned_cells=snapshot_burned_cells,
+                iteration=iteration,
+            )
+
         # Add newly ignited cells to burning
         burning |= new_burning
         elapsed += dt_minutes
@@ -311,17 +348,114 @@ def run_cellular_simulation(
             min(elapsed, duration_minutes), all_burned_cells, snapshot_burned_cells,
             rows, cols, cell_size_m, fuel_grid, burned,
             mean_ros=last_mean_ros,
+            spot_fires=list(snapshot_spot_fires) if snapshot_spot_fires else None,
         )
         frames.append(frame)
 
     total_burned = int(np.sum(burned))
     logger.info(
-        "CA simulation complete: %.1fh, %d cells burned (%.1f ha), %d iterations",
+        "CA simulation complete: %.1fh, %d cells burned (%.1f ha), %d spot fires, %d iterations",
         config["duration_hours"], total_burned,
-        total_burned * (cell_size_m ** 2) / 10000.0, iteration,
+        total_burned * (cell_size_m ** 2) / 10000.0, len(all_spot_fires), iteration,
     )
 
     return frames
+
+
+def _apply_spotting(
+    burning: np.ndarray,
+    burned: np.ndarray,
+    new_burning: np.ndarray,
+    fuel_grid: FuelGrid,
+    conditions: SpreadConditions,
+    spread_modifier_grid: SpreadModifierGrid | None,
+    default_fuel: FuelType,
+    lat_max: float,
+    lat_min: float,
+    lng_min: float,
+    cell_lat: float,
+    cell_lng: float,
+    rows: int,
+    cols: int,
+    dt_minutes: float,
+    spotting_intensity: float,
+    all_spot_fires: list[SpotFire],
+    snapshot_spot_fires: list[SpotFire],
+    all_burned_cells: list[BurnedCell],
+    snapshot_burned_cells: list[BurnedCell],
+    iteration: int,
+) -> None:
+    """Apply ember spotting from the CA fire front.
+
+    Identifies cells on the fire perimeter (burning cells adjacent to unburned
+    fuel), converts them to FireVertex objects, and calls check_ember_spotting.
+    Spot fire landing locations are seeded as new ignitions in new_burning.
+    """
+    # Extract fire front: burning cells that border unburned fuel
+    front_vertices: list[FireVertex] = []
+    burn_rows, burn_cols = np.where(burning)
+
+    # Cap front sample for performance — every 3rd burning cell
+    FRONT_SAMPLE_INTERVAL = 3
+    for idx in range(0, len(burn_rows), FRONT_SAMPLE_INTERVAL):
+        row, col = int(burn_rows[idx]), int(burn_cols[idx])
+        # Only include cells with at least one unburned fuel neighbor (true front)
+        is_front = False
+        for dr, dc, _ in [(-1, 0, 0), (0, 1, 0), (1, 0, 0), (0, -1, 0)]:
+            nr, nc = row + dr, col + dc
+            if 0 <= nr < rows and 0 <= nc < cols:
+                if not burned[nr, nc] and not burning[nr, nc]:
+                    neighbor_fuel = fuel_grid.fuel_types[nr][nc]
+                    if neighbor_fuel is not None:
+                        is_front = True
+                        break
+        if is_front:
+            cell_center_lat = lat_max - (row + 0.5) * cell_lat
+            cell_center_lng = lng_min + (col + 0.5) * cell_lng
+            front_vertices.append(FireVertex(lat=cell_center_lat, lng=cell_center_lng))
+
+    if not front_vertices:
+        return
+
+    spots = check_ember_spotting(
+        front=front_vertices,
+        conditions=conditions,
+        fuel_grid=fuel_grid,
+        spread_modifier_grid=spread_modifier_grid,
+        default_fuel=default_fuel,
+        dt_minutes=dt_minutes,
+        check_interval=1,
+        intensity_multiplier=spotting_intensity,
+    )
+
+    for spot in spots:
+        # Convert spot landing lat/lng to grid coordinates
+        spot_row = int((lat_max - spot.lat) / cell_lat)
+        spot_col = int((spot.lng - lng_min) / cell_lng)
+
+        if not (0 <= spot_row < rows and 0 <= spot_col < cols):
+            continue  # Outside grid bounds
+        if burned[spot_row, spot_col] or burning[spot_row, spot_col] or new_burning[spot_row, spot_col]:
+            continue  # Already burning
+
+        spot_fuel = fuel_grid.fuel_types[spot_row][spot_col]
+        if spot_fuel is None:
+            continue  # Non-fuel landing cell
+
+        new_burning[spot_row, spot_col] = True
+        cell_lat_pos = lat_max - (spot_row + 0.5) * cell_lat
+        cell_lng_pos = lng_min + (spot_col + 0.5) * cell_lng
+        cell = BurnedCell(
+            lat=cell_lat_pos,
+            lng=cell_lng_pos,
+            intensity=spot.hfi_kw_m,
+            fuel_type=spot_fuel.value,
+            timestep=iteration,
+        )
+        all_burned_cells.append(cell)
+        snapshot_burned_cells.append(cell)
+        all_spot_fires.append(spot)
+        snapshot_spot_fires.append(spot)
 
 
 def _elliptical_spread_prob(
@@ -371,6 +505,7 @@ def _make_frame(
     fuel_grid: FuelGrid,
     burned: np.ndarray,
     mean_ros: float = 0.0,
+    spot_fires: list[SpotFire] | None = None,
 ) -> CellularFrame:
     """Create a frame snapshot with all cumulative cells + timestamps."""
     total = int(np.sum(burned))
@@ -394,4 +529,5 @@ def _make_frame(
         max_intensity=max_intensity,
         mean_ros=mean_ros,
         fuel_breakdown=fuel_breakdown,
+        spot_fires=spot_fires,
     )

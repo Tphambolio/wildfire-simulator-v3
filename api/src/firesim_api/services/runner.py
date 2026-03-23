@@ -310,6 +310,8 @@ class SimulationRunner:
                 terrain_grid=terrain_grid,
                 default_fuel=fuel_type,
                 spread_modifier_grid=spread_modifier_grid,
+                enable_spotting=getattr(params, "enable_spotting", False),
+                spotting_intensity=getattr(params, "spotting_intensity", 1.0),
             )
 
             for frame in simulator.run():

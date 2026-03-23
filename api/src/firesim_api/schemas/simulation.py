@@ -79,6 +79,23 @@ class SimulationCreate(BaseModel):
             "landscape around the ignition point for demo/testing purposes."
         ),
     )
+    enable_spotting: bool = Field(
+        default=False,
+        description=(
+            "Enable Albini (1979) ember spotting model. When True, wind-lofted embers "
+            "from high-intensity crown fire cells seed new ignitions downwind, "
+            "dramatically increasing spread under high-FWI conditions."
+        ),
+    )
+    spotting_intensity: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=5.0,
+        description=(
+            "Multiplier on spot fire probability (1.0 = baseline, 0 = no spotting, "
+            ">1 = increased ember density). Only used when enable_spotting is True."
+        ),
+    )
 
 
 class SimulationStatus(str, Enum):

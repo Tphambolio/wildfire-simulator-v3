@@ -120,6 +120,8 @@ export default function WeatherPanel({
   const [fuelType, setFuelType] = useState("C2");
   const [useEdmontonGrid, setUseEdmontonGrid] = useState(false);
   const [useSyntheticCA, setUseSyntheticCA] = useState(false);
+  const [enableSpotting, setEnableSpotting] = useState(false);
+  const [spottingIntensity, setSpottingIntensity] = useState(1.0);
   const [includeWater, setIncludeWater] = useState(true);
   const [includeBuildings, setIncludeBuildings] = useState(true);
   const [includeWUI, setIncludeWUI] = useState(true);
@@ -259,6 +261,8 @@ export default function WeatherPanel({
       wui_zones_path: useEdmontonGrid && includeWUI ? EDMONTON_WUI_PATH : null,
       dem_path: useEdmontonGrid && includeDEM ? EDMONTON_DEM_PATH : null,
       use_ca_mode: useSyntheticCA && !useEdmontonGrid,
+      enable_spotting: enableSpotting,
+      spotting_intensity: spottingIntensity,
     });
   };
 
@@ -491,6 +495,37 @@ export default function WeatherPanel({
             {useSyntheticCA && (
               <div className="hint" style={{ fontSize: "0.85em", opacity: 0.7 }}>
                 Generates a 5km mixed-fuel grid around the ignition point — shows heatmap spread
+              </div>
+            )}
+          </>
+        )}
+        {(useEdmontonGrid || useSyntheticCA) && (
+          <>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
+              <input
+                type="checkbox"
+                checked={enableSpotting}
+                onChange={(e) => setEnableSpotting(e.target.checked)}
+              />
+              Ember spotting (Albini 1979)
+            </label>
+            {enableSpotting && (
+              <div style={{ paddingLeft: "20px", marginTop: "4px" }}>
+                <label style={{ fontSize: "0.9em" }}>
+                  Intensity: <strong>{spottingIntensity.toFixed(1)}×</strong>
+                  <input
+                    type="range"
+                    min={0.1}
+                    max={3.0}
+                    step={0.1}
+                    value={spottingIntensity}
+                    onChange={(e) => setSpottingIntensity(Number(e.target.value))}
+                    style={{ width: "100%", marginTop: "2px" }}
+                  />
+                </label>
+                <div className="hint" style={{ fontSize: "0.8em", opacity: 0.7 }}>
+                  Crown fires loft embers downwind — seeds secondary ignitions
+                </div>
               </div>
             )}
           </>

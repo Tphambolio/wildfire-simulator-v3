@@ -599,3 +599,92 @@ class TestMeanROSFromSimulation:
             "Expected at least one frame with mean_ros > 0 after fire spread, "
             f"got: {[f.mean_ros for f in frames]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Ember spotting integration — CA seeding (Albini 1979 / Van Wagner 1977)
+# ---------------------------------------------------------------------------
+
+
+class TestCASpottingIntegration:
+    """Verify ember spotting seeds new ignitions in the CA model.
+
+    Under extreme crown fire conditions (C5, high FWI, 50 km/h wind),
+    the spotting model should produce at least some ignitions in a run
+    across many random seeds. Tests confirm:
+    - enable_spotting=False produces no spot_fires in any frame
+    - enable_spotting=True with extreme conditions produces spot fires
+      in at least some frames across repeated runs
+    - Spot fire coordinates are within the fuel grid bounds
+    - spotting_intensity=0 suppresses all spot fires
+    """
+
+    def _run_extreme(self, enable_spotting: bool, spotting_intensity: float = 1.0, seed: int = 0):
+        random.seed(seed)
+        np.random.seed(seed)
+        conditions = SpreadConditions(
+            wind_speed=55.0,
+            wind_direction=270.0,
+            ffmc=95.0,
+            dmc=85.0,
+            dc=600.0,
+        )
+        grid = make_uniform_grid(rows=40, cols=40, fuel=FuelType.C5, cell_deg=0.005)
+        config = center_config(grid, duration_hours=1.0)
+        return run_cellular_simulation(
+            config=config,
+            fuel_grid=grid,
+            conditions=conditions,
+            dt_minutes=1.0,
+            snapshot_interval_minutes=30.0,
+            enable_spotting=enable_spotting,
+            spotting_intensity=spotting_intensity,
+        ), grid
+
+    def test_no_spotting_when_disabled(self):
+        """enable_spotting=False must produce no spot_fires in any frame."""
+        frames, _ = self._run_extreme(enable_spotting=False)
+        for frame in frames:
+            assert frame.spot_fires is None or frame.spot_fires == [], (
+                "Expected no spot fires when enable_spotting=False"
+            )
+
+    def test_spotting_produces_fires_under_extreme_conditions(self):
+        """With extreme conditions, at least one spot fire across multiple seeds."""
+        all_spots = []
+        for seed in range(30):
+            frames, _ = self._run_extreme(enable_spotting=True, seed=seed)
+            for frame in frames:
+                if frame.spot_fires:
+                    all_spots.extend(frame.spot_fires)
+        # Stochastic: not guaranteed every seed produces spots, but across 30 runs some must
+        assert len(all_spots) > 0, (
+            "Expected at least one spot fire in 30 runs with extreme conditions"
+        )
+
+    def test_spot_fires_within_grid_bounds(self):
+        """Spot fire coordinates must fall within the fuel grid."""
+        for seed in range(15):
+            frames, grid = self._run_extreme(enable_spotting=True, seed=seed)
+            for frame in frames:
+                if not frame.spot_fires:
+                    continue
+                for spot in frame.spot_fires:
+                    assert grid.lat_min <= spot.lat <= grid.lat_max, (
+                        f"Spot fire lat {spot.lat} outside grid [{grid.lat_min}, {grid.lat_max}]"
+                    )
+                    assert grid.lng_min <= spot.lng <= grid.lng_max, (
+                        f"Spot fire lng {spot.lng} outside grid [{grid.lng_min}, {grid.lng_max}]"
+                    )
+
+    def test_zero_intensity_suppresses_spotting(self):
+        """spotting_intensity=0 must produce no spot fires."""
+        all_spots = []
+        for seed in range(20):
+            frames, _ = self._run_extreme(enable_spotting=True, spotting_intensity=0.0, seed=seed)
+            for frame in frames:
+                if frame.spot_fires:
+                    all_spots.extend(frame.spot_fires)
+        assert all_spots == [], (
+            "Expected no spot fires when spotting_intensity=0"
+        )
