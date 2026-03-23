@@ -52,6 +52,7 @@ class BurnedCell:
     intensity: float  # kW/m
     fuel_type: str
     timestep: int
+    fire_type: str = "surface"  # FireType value: surface, surface_with_torching, passive_crown, active_crown
 
 
 @dataclass
@@ -220,8 +221,8 @@ def run_cellular_simulation(
             if fuel is None:
                 continue
 
-            # Get FBP output
-            ros_base, fi, lbr, fire_type = get_fbp(fuel)
+            # Get FBP output (ros_base, head fire intensity, LBR, fire_type enum)
+            ros_base, fi, lbr, cell_fire_type = get_fbp(fuel)
             ros_sum += ros_base
             ros_count += 1
 
@@ -291,12 +292,15 @@ def run_cellular_simulation(
                     # Record burned cell
                     cell_lat_pos = lat_max - (nr + 0.5) * cell_lat
                     cell_lng_pos = lng_min + (nc + 0.5) * cell_lng
+                    # Determine fire type for the neighbor cell using its own FBP
+                    neighbor_fire_type = get_fbp(neighbor_fuel)[3]
                     cell = BurnedCell(
                         lat=cell_lat_pos,
                         lng=cell_lng_pos,
                         intensity=fi,
                         fuel_type=neighbor_fuel.value,
                         timestep=iteration,
+                        fire_type=neighbor_fire_type.value,
                     )
                     all_burned_cells.append(cell)
                     snapshot_burned_cells.append(cell)
@@ -451,6 +455,7 @@ def _apply_spotting(
             intensity=spot.hfi_kw_m,
             fuel_type=spot_fuel.value,
             timestep=iteration,
+            fire_type="surface",  # Spot fire ignitions begin as surface fires
         )
         all_burned_cells.append(cell)
         snapshot_burned_cells.append(cell)

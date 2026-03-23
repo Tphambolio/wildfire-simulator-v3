@@ -321,7 +321,7 @@ export default function MapView({
       },
     });
 
-    // Individual cell circles (visible at high zoom)
+    // Individual cell circles (visible at high zoom) — colored by crown fire state
     m.addLayer({
       id: "fire-cells-layer",
       type: "circle",
@@ -330,16 +330,15 @@ export default function MapView({
       paint: {
         "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 3, 17, 10],
         "circle-color": [
-          "interpolate", ["linear"], ["get", "intensity"],
-          0, "#ffeb3b",
-          2000, "#ff9800",
-          4000, "#f44336",
-          8000, "#b71c1c",
-          15000, "#4a0000",
+          "match", ["get", "fire_type"],
+          "active_crown",        "#8B0000",  // dark red — active crown fire
+          "passive_crown",       "#CC2200",  // deep red — passive crown fire
+          "surface_with_torching", "#FF5500",// orange-red — torching
+          "#FF9800",                         // default orange — surface fire
         ],
-        "circle-opacity": 0.7,
+        "circle-opacity": 0.78,
         "circle-stroke-width": 0.5,
-        "circle-stroke-color": "#333",
+        "circle-stroke-color": "#222",
       },
     });
 
@@ -763,12 +762,14 @@ export default function MapView({
 
       // Each frame already contains ALL cumulative cells up to that point.
       // Use the current frame directly — no cross-frame accumulation needed.
-      const allCells = currentFrame.burned_cells as Array<{ lat: number; lng: number; intensity: number }>;
+      const allCells = currentFrame.burned_cells as Array<{
+        lat: number; lng: number; intensity: number; fire_type?: string;
+      }>;
 
       const features: GeoJSON.Feature[] = allCells.map((c) => ({
         type: "Feature" as const,
         geometry: { type: "Point" as const, coordinates: [c.lng, c.lat] },
-        properties: { intensity: c.intensity },
+        properties: { intensity: c.intensity, fire_type: c.fire_type ?? "surface" },
       }));
 
       heatSrc.setData({ type: "FeatureCollection", features });
@@ -1040,6 +1041,25 @@ export default function MapView({
               { label: "30%",  color: "#ffdd00" },
               { label: "10%",  color: "#ffffcc" },
               { label: "0%",   color: "rgba(255,255,255,0.15)" },
+            ].map(({ label, color }) => (
+              <div key={label} className="burn-prob-legend-row">
+                <div className="burn-prob-legend-swatch" style={{ background: color }} />
+                <span>{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* Crown Fire Type Legend — shown in CA mode when cells are present */}
+      {frames.length > 0 && frames[currentFrameIndex]?.burned_cells && frames[currentFrameIndex].burned_cells!.length > 0 && (
+        <div className="burn-prob-legend" style={{ bottom: 120 }}>
+          <div className="burn-prob-legend-title">Crown Fire State</div>
+          <div className="burn-prob-legend-scale">
+            {[
+              { label: "Active crown",    color: "#8B0000" },
+              { label: "Passive crown",   color: "#CC2200" },
+              { label: "Torching",        color: "#FF5500" },
+              { label: "Surface fire",    color: "#FF9800" },
             ].map(({ label, color }) => (
               <div key={label} className="burn-prob-legend-row">
                 <div className="burn-prob-legend-swatch" style={{ background: color }} />

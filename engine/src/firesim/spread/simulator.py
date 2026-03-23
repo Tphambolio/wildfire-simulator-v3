@@ -250,9 +250,15 @@ class Simulator:
             else:
                 perimeter = []
 
-            # Build burned_cells list for heatmap rendering (with age for coloring)
+            # Build burned_cells list for heatmap rendering (with fire_type for color coding)
             burned_data = [
-                {"lat": c.lat, "lng": c.lng, "intensity": c.intensity, "fuel": c.fuel_type, "t": c.timestep}
+                {
+                    "lat": c.lat, "lng": c.lng,
+                    "intensity": c.intensity,
+                    "fuel": c.fuel_type,
+                    "fire_type": c.fire_type,
+                    "t": c.timestep,
+                }
                 for c in cf.burned_cells
             ]
 
@@ -263,13 +269,29 @@ class Simulator:
                     for s in cf.spot_fires
                 ]
 
+            # Derive worst (most severe) fire type from all burned cells
+            _TYPE_PRIORITY = {
+                "active_crown": 3,
+                "passive_crown": 2,
+                "surface_with_torching": 1,
+                "surface": 0,
+            }
+            if cf.burned_cells:
+                worst_type_str = max(
+                    (c.fire_type for c in cf.burned_cells),
+                    key=lambda ft: _TYPE_PRIORITY.get(ft, 0),
+                )
+                frame_fire_type = FireType(worst_type_str)
+            else:
+                frame_fire_type = FireType.SURFACE
+
             yield SimulationFrame(
                 time_hours=cf.time_hours,
                 perimeter=perimeter,
                 area_ha=cf.area_ha,
                 head_ros_m_min=cf.mean_ros,
                 max_hfi_kw_m=cf.max_intensity,
-                fire_type=FireType.SURFACE,
+                fire_type=frame_fire_type,
                 flame_length_m=0.0,
                 fuel_breakdown=cf.fuel_breakdown,
                 spot_fires=ca_spot_fires,
