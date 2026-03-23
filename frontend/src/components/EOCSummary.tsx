@@ -8,6 +8,7 @@
 
 import type { SimulationFrame, BurnProbabilityResponse } from "../types/simulation";
 import type { RunParams } from "./WeatherPanel";
+import { buildGeoJSON, buildKML, downloadFile } from "../utils/geoExport";
 
 interface EOCSummaryProps {
   frames: SimulationFrame[];
@@ -18,6 +19,10 @@ interface EOCSummaryProps {
   fuelTypeLabel?: string;
   /** At-risk feature counts from infrastructure overlay (P ≥ 50% intersection) */
   atRiskCounts?: { roads: number; communities: number; infrastructure: number };
+  /** Annotated overlay GeoJSON for inclusion in GeoJSON export */
+  overlayRoads?: GeoJSON.FeatureCollection | null;
+  overlayCommunities?: GeoJSON.FeatureCollection | null;
+  overlayInfrastructure?: GeoJSON.FeatureCollection | null;
 }
 
 // ── Geometry helpers ────────────────────────────────────────────────────────
@@ -265,6 +270,9 @@ export default function EOCSummary({
   ignitionPoint,
   fuelTypeLabel,
   atRiskCounts,
+  overlayRoads,
+  overlayCommunities,
+  overlayInfrastructure,
 }: EOCSummaryProps) {
   const spread = extractSpreadStats(frames);
   const burnArea = burnProbData ? extractBurnAreaStats(burnProbData) : null;
@@ -288,6 +296,19 @@ export default function EOCSummary({
 
   const handlePrint = () => window.print();
 
+  const exportOpts = { frames, burnProbData, runParams, ignitionPoint, fuelTypeLabel, overlayRoads, overlayCommunities, overlayInfrastructure };
+  const timestamp = new Date().toISOString().slice(0, 10);
+
+  const handleExportGeoJSON = () => {
+    const geojson = buildGeoJSON(exportOpts);
+    downloadFile(JSON.stringify(geojson, null, 2), `firesim_${timestamp}.geojson`, "application/geo+json");
+  };
+
+  const handleExportKML = () => {
+    const kml = buildKML(exportOpts);
+    downloadFile(kml, `firesim_${timestamp}.kml`, "application/vnd.google-earth.kml+xml");
+  };
+
   const intClass = spread ? intensityClass(spread.peakHfiKwM) : null;
 
   return (
@@ -301,6 +322,24 @@ export default function EOCSummary({
           <button className="ts-btn ts-speed" onClick={handlePrint} title="Print report">
             Print
           </button>
+          {frames.length > 0 && (
+            <>
+              <button
+                className="ts-btn ts-speed"
+                onClick={handleExportGeoJSON}
+                title="Download GeoJSON — fire perimeter, burn probability, spot fires, at-risk infrastructure"
+              >
+                GeoJSON
+              </button>
+              <button
+                className="ts-btn ts-speed"
+                onClick={handleExportKML}
+                title="Download KML — fire perimeter and ignition point for Google Earth / ArcGIS"
+              >
+                KML
+              </button>
+            </>
+          )}
         </div>
       </div>
 

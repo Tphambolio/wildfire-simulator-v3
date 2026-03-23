@@ -416,6 +416,9 @@ export default function App() {
                 : undefined
             }
             atRiskCounts={overlayAtRiskCounts}
+            overlayRoads={overlayAnnotated.roads.annotated as GeoJSON.FeatureCollection | null}
+            overlayCommunities={overlayAnnotated.communities.annotated as GeoJSON.FeatureCollection | null}
+            overlayInfrastructure={overlayAnnotated.infrastructure.annotated as GeoJSON.FeatureCollection | null}
           />
           <OverlayPanel
             layers={overlayLayers}
