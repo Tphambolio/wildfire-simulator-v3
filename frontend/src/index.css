@@ -1233,3 +1233,120 @@ select {
   .eoc-value { color: black; }
   .eoc-actions { display: none; }
 }
+
+/* ── Scenario panel ──────────────────────────────────────────────────────── */
+.scenario-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.panel-collapse-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 0.95em;
+  font-weight: 600;
+  padding: 12px 16px;
+  cursor: pointer;
+  text-align: left;
+  letter-spacing: 0.03em;
+}
+
+.panel-collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.collapse-icon {
+  margin-left: auto;
+  font-size: 0.75em;
+  opacity: 0.6;
+}
+
+.scenario-count-badge {
+  background: var(--accent);
+  color: #000;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 0.75em;
+  font-weight: 700;
+  margin-left: 4px;
+}
+
+.scenario-body {
+  padding: 0 12px 12px;
+}
+
+.scenario-name-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #0f1a2e;
+  border: 1px solid #2a3a5a;
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.88em;
+  padding: 6px 8px;
+}
+
+.scenario-name-input::placeholder {
+  color: #667;
+}
+
+.scenario-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.scenario-item {
+  background: #0f1a2e;
+  border: 1px solid #1e2e4a;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.scenario-item-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.scenario-item-name {
+  font-weight: 600;
+  font-size: 0.88em;
+  color: var(--text-primary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-item-date {
+  font-size: 0.75em;
+  color: #667;
+  white-space: nowrap;
+}
+
+.scenario-item-desc {
+  font-size: 0.8em;
+  color: #8899bb;
+  margin-bottom: 3px;
+}
+
+.scenario-item-meta {
+  font-size: 0.78em;
+  color: #556;
+  margin-bottom: 6px;
+}
+
+.scenario-item-actions {
+  display: flex;
+  gap: 5px;
+}

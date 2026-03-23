@@ -133,32 +133,40 @@ function buildICSText(
 ): string {
   const now = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
   const lines: string[] = [
-    "FIRE BEHAVIOR SUMMARY — ICS 204 / EOC REPORT",
-    `Generated: ${now}`,
-    "Source: FireSim V3 — Canadian FBP Wildfire Spread Simulator",
+    "WILDFIRE SITUATION ANALYSIS — EOC FIRE BEHAVIOR PROJECTION",
+    `Report date/time: ${now}`,
+    "Model: FireSim V3 — CFFDRS/FBP Fire Spread Simulation (NRCan ST-X-3)",
+    "NOTE: This report presents modeled projections for planning purposes only.",
+    "      Actual fire behavior may differ. Verify with ground/air observation.",
     "",
   ];
 
   if (ignition) {
-    lines.push("IGNITION POINT");
-    lines.push(`  Lat: ${ignition.lat.toFixed(5)}°  Lng: ${ignition.lng.toFixed(5)}°`);
+    lines.push("1. LOCATION");
+    lines.push(`  Ignition point:  ${ignition.lat.toFixed(5)}°N  ${Math.abs(ignition.lng).toFixed(5)}°W`);
     lines.push("");
   }
 
   if (params) {
-    lines.push("INPUT CONDITIONS");
-    lines.push(`  Wind:         ${params.weather.wind_speed} km/h @ ${params.weather.wind_direction}°`);
-    lines.push(`  Temp / RH:    ${params.weather.temperature}°C / ${params.weather.relative_humidity}%`);
-    lines.push(`  FFMC:         ${params.fwi.ffmc ?? "—"}`);
-    lines.push(`  DMC / DC:     ${params.fwi.dmc ?? "—"} / ${params.fwi.dc ?? "—"}`);
-    lines.push(`  FWI:          ${params.fwi_value.toFixed(1)} (${params.danger_rating})`);
-    if (fuelTypeLabel) lines.push(`  Fuel:         ${fuelTypeLabel}`);
-    lines.push(`  Duration:     ${params.duration_hours}h`);
+    lines.push("2. FIRE WEATHER CONDITIONS");
+    lines.push(`  Wind speed:      ${params.weather.wind_speed} km/h`);
+    lines.push(`  Wind direction:  ${params.weather.wind_direction}° (${windDirLabel(params.weather.wind_direction)})`);
+    lines.push(`  Temperature:     ${params.weather.temperature}°C`);
+    lines.push(`  Rel. humidity:   ${params.weather.relative_humidity}%`);
+    lines.push(`  Precipitation:   ${params.weather.precipitation_24h ?? 0} mm/24h`);
+    lines.push("");
+    lines.push("3. CFFDRS FIRE WEATHER INDEX");
+    lines.push(`  FFMC:  ${params.fwi.ffmc ?? "—"}    (Fine Fuel Moisture Code)`);
+    lines.push(`  DMC:   ${params.fwi.dmc ?? "—"}    (Duff Moisture Code)`);
+    lines.push(`  DC:    ${params.fwi.dc ?? "—"}    (Drought Code)`);
+    lines.push(`  FWI:   ${params.fwi_value.toFixed(1)}  — ${params.danger_rating}`);
+    if (fuelTypeLabel) lines.push(`  Fuel:  ${fuelTypeLabel}`);
+    lines.push(`  Sim duration:    ${params.duration_hours}h`);
     lines.push("");
   }
 
   if (dayStats && dayStats.length > 0) {
-    lines.push("MULTI-DAY PROGRESSION");
+    lines.push("4. MULTI-DAY FIRE PROGRESSION");
     lines.push("  Day   Area (ha)   Peak HFI (kW/m)   Fire Type");
     for (const d of dayStats) {
       const day = String(d.day).padEnd(5);
@@ -170,49 +178,49 @@ function buildICSText(
     lines.push("");
   }
 
+  const sectionBase = dayStats && dayStats.length > 0 ? 5 : 4;
+
   if (spread) {
-    lines.push("FIRE SPREAD SIMULATION");
-    lines.push(`  Final area:       ${spread.finalAreaHa.toFixed(1)} ha`);
+    lines.push(`${sectionBase}. PROJECTED FIRE BEHAVIOR`);
+    lines.push(`  Projected area:    ${spread.finalAreaHa.toFixed(1)} ha`);
     if (spread.perimeterKm > 0) {
-      lines.push(`  Perimeter:        ${spread.perimeterKm.toFixed(2)} km`);
+      lines.push(`  Est. perimeter:    ${spread.perimeterKm.toFixed(2)} km`);
     }
-    lines.push(`  Peak ROS:         ${spread.peakRosMMmin.toFixed(1)} m/min`);
-    lines.push(`  Peak HFI:         ${spread.peakHfiKwM.toFixed(0)} kW/m`);
-    lines.push(`  Fire type:        ${spread.fireType.replace(/_/g, " ")}`);
+    lines.push(`  Peak ROS (head):   ${spread.peakRosMMmin.toFixed(1)} m/min`);
+    lines.push(`  Peak HFI:          ${spread.peakHfiKwM.toFixed(0)} kW/m`);
+    lines.push(`  Fire type:         ${spread.fireType.replace(/_/g, " ")}`);
     if (spread.flameLengthM > 0) {
-      lines.push(`  Flame length:     ${spread.flameLengthM.toFixed(1)} m`);
+      lines.push(`  Flame length:      ${spread.flameLengthM.toFixed(1)} m`);
     }
-    if (spread.spotCount > 0) {
-      lines.push(`  Spotting:         ${spread.spotCount} events, max ${spread.maxSpotDistM.toFixed(0)} m`);
-    } else {
-      lines.push(`  Spotting:         None detected`);
-    }
+    lines.push(`  Ember spotting:    ${spread.spotCount > 0 ? `${spread.spotCount} events, max ${spread.maxSpotDistM.toFixed(0)} m` : "None projected"}`);
     lines.push("");
   }
 
   if (burnArea) {
-    lines.push("BURN PROBABILITY ANALYSIS");
-    lines.push(`  Area P ≥ 25%:   ${burnArea.p25Ha.toFixed(1)} ha`);
-    lines.push(`  Area P ≥ 50%:   ${burnArea.p50Ha.toFixed(1)} ha`);
-    lines.push(`  Area P ≥ 75%:   ${burnArea.p75Ha.toFixed(1)} ha`);
-    lines.push(`  Cell size:      ${burnArea.cellSizeM.toFixed(0)} m`);
-    if (params) {
-      lines.push(`  Iterations:     ${params.n_iterations}`);
-    }
+    const n = sectionBase + (spread ? 1 : 0);
+    lines.push(`${n}. BURN PROBABILITY (Monte Carlo — ${params?.n_iterations ?? "?"} iterations)`);
+    lines.push(`  Area P ≥ 75%:  ${burnArea.p75Ha.toFixed(1)} ha  (high confidence burn zone)`);
+    lines.push(`  Area P ≥ 50%:  ${burnArea.p50Ha.toFixed(1)} ha  (probable burn zone)`);
+    lines.push(`  Area P ≥ 25%:  ${burnArea.p25Ha.toFixed(1)} ha  (possible burn zone)`);
+    lines.push(`  Grid cell:     ${burnArea.cellSizeM.toFixed(0)} m`);
     lines.push("");
   }
 
   const hasAtRisk = atRiskCounts &&
     (atRiskCounts.roads + atRiskCounts.communities + atRiskCounts.infrastructure) > 0;
   if (hasAtRisk && atRiskCounts) {
-    lines.push("AT-RISK INFRASTRUCTURE (P ≥ 50% burn zone)");
-    if (atRiskCounts.communities > 0) lines.push(`  Communities:    ${atRiskCounts.communities}`);
-    if (atRiskCounts.roads > 0) lines.push(`  Road segments:  ${atRiskCounts.roads}`);
-    if (atRiskCounts.infrastructure > 0) lines.push(`  Infra points:   ${atRiskCounts.infrastructure}`);
+    const n = sectionBase + (spread ? 1 : 0) + (burnArea ? 1 : 0);
+    lines.push(`${n}. INFRASTRUCTURE AT RISK (within P ≥ 50% zone)`);
+    if (atRiskCounts.communities > 0) lines.push(`  Communities:       ${atRiskCounts.communities}  — consider evacuation assessment`);
+    if (atRiskCounts.roads > 0) lines.push(`  Road segments:     ${atRiskCounts.roads}  — assess route closures`);
+    if (atRiskCounts.infrastructure > 0) lines.push(`  Critical infra:    ${atRiskCounts.infrastructure}  — coordinate with utilities`);
     lines.push("");
   }
 
-  lines.push("— END REPORT —");
+  lines.push("─".repeat(60));
+  lines.push("Prepared using CFFDRS FBP System (Forestry Canada ST-X-3, 1992)");
+  lines.push("FireSim V3 | Albini 1979 spotfire | Van Wagner 1977 crown fire");
+  lines.push("─".repeat(60));
   return lines.join("\n");
 }
 
@@ -316,8 +324,8 @@ export default function EOCSummary({
       <div className="eoc-header">
         <h3>EOC Summary</h3>
         <div className="eoc-actions">
-          <button className="ts-btn ts-speed" onClick={handleCopy} title="Copy ICS report to clipboard">
-            Copy ICS
+          <button className="ts-btn ts-speed" onClick={handleCopy} title="Copy situation report to clipboard">
+            Copy Report
           </button>
           <button className="ts-btn ts-speed" onClick={handlePrint} title="Print report">
             Print

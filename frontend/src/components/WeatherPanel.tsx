@@ -1,7 +1,7 @@
 /** Weather and simulation parameter controls. */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { SimulationCreate, MultiDaySimulationCreate, MultiDayWeatherParams, WeatherParams, FWIOverrides, BurnProbabilityRequest } from "../types/simulation";
+import type { SimulationCreate, MultiDaySimulationCreate, MultiDayWeatherParams, WeatherParams, FWIOverrides, BurnProbabilityRequest, ScenarioConfig } from "../types/simulation";
 import { FUEL_TYPES } from "../types/simulation";
 import { fetchCurrentWeather, calculateFWI } from "../services/api";
 import MultiDayPanel from "./MultiDayPanel";
@@ -94,6 +94,10 @@ interface WeatherPanelProps {
   ignitionPoint: { lat: number; lng: number } | null;
   isRunning: boolean;
   burnProbRunning?: boolean;
+  /** When set, load this scenario config into the panel's local state. */
+  scenarioToLoad?: ScenarioConfig | null;
+  /** Called after a scenario config has been extracted for saving. */
+  onConfigSnapshot?: (config: Omit<ScenarioConfig, "id" | "createdAt" | "name" | "description">) => void;
 }
 
 export default function WeatherPanel({
@@ -104,6 +108,8 @@ export default function WeatherPanel({
   ignitionPoint,
   isRunning,
   burnProbRunning,
+  scenarioToLoad,
+  onConfigSnapshot,
 }: WeatherPanelProps) {
   const [weather, setWeather] = useState<WeatherParams>({
     wind_speed: 20,
@@ -140,6 +146,57 @@ export default function WeatherPanel({
     { wind_speed: 20, wind_direction: 270, temperature: 25, relative_humidity: 30, precipitation_24h: 0 },
     { wind_speed: 25, wind_direction: 270, temperature: 28, relative_humidity: 25, precipitation_24h: 0 },
     { wind_speed: 30, wind_direction: 260, temperature: 30, relative_humidity: 20, precipitation_24h: 0 },
+  ]);
+
+  // ── Apply scenario config when requested ─────────────────────────────────
+  const loadedScenarioIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!scenarioToLoad || scenarioToLoad.id === loadedScenarioIdRef.current) return;
+    loadedScenarioIdRef.current = scenarioToLoad.id;
+    setWeather(scenarioToLoad.weather);
+    setFwi(scenarioToLoad.fwi);
+    setFuelType(scenarioToLoad.fuelType);
+    setUseEdmontonGrid(scenarioToLoad.useEdmontonGrid);
+    setUseSyntheticCA(scenarioToLoad.useSyntheticCA);
+    setEnableSpotting(scenarioToLoad.enableSpotting);
+    setSpottingIntensity(scenarioToLoad.spottingIntensity);
+    setIncludeWater(scenarioToLoad.includeWater);
+    setIncludeBuildings(scenarioToLoad.includeBuildings);
+    setIncludeWUI(scenarioToLoad.includeWUI);
+    setIncludeDEM(scenarioToLoad.includeDEM);
+    setDurationHours(scenarioToLoad.durationHours);
+    setSnapshotMinutes(scenarioToLoad.snapshotMinutes);
+    setSimMode(scenarioToLoad.simMode);
+    setMultiDayDays(scenarioToLoad.multiDayDays);
+    setMcIterations(scenarioToLoad.mcIterations);
+  }, [scenarioToLoad]);
+
+  // ── Provide config snapshot to parent for saving ──────────────────────────
+  useEffect(() => {
+    onConfigSnapshot?.({
+      ignitionPoint,
+      weather,
+      fwi,
+      fuelType,
+      useEdmontonGrid,
+      useSyntheticCA,
+      enableSpotting,
+      spottingIntensity,
+      includeWater,
+      includeBuildings,
+      includeWUI,
+      includeDEM,
+      durationHours,
+      snapshotMinutes,
+      simMode,
+      multiDayDays,
+      mcIterations,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    ignitionPoint, weather, fwi, fuelType, useEdmontonGrid, useSyntheticCA,
+    enableSpotting, spottingIntensity, includeWater, includeBuildings, includeWUI,
+    includeDEM, durationHours, snapshotMinutes, simMode, multiDayDays, mcIterations,
   ]);
 
   // ── Auto-fetch CWFIS weather when ignition point is first set ─────────────

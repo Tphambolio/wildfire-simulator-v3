@@ -146,6 +146,34 @@ export interface CurrentWeather {
   data_timestamp: string | null;
 }
 
+export interface ScenarioConfig {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  ignitionPoint: { lat: number; lng: number } | null;
+  weather: WeatherParams;
+  fwi: FWIOverrides;
+  fuelType: string;
+  useEdmontonGrid: boolean;
+  useSyntheticCA: boolean;
+  enableSpotting: boolean;
+  spottingIntensity: number;
+  includeWater: boolean;
+  includeBuildings: boolean;
+  includeWUI: boolean;
+  includeDEM: boolean;
+  durationHours: number;
+  snapshotMinutes: number;
+  simMode: "single" | "multiday";
+  multiDayDays: MultiDayWeatherParams[];
+  mcIterations: number;
+  lastRunStats?: {
+    areaHa: number;
+    timeHours: number;
+  } | null;
+}
+
 export const FUEL_TYPES: Record<string, string> = {
   C1: "Spruce-Lichen Woodland",
   C2: "Boreal Spruce",

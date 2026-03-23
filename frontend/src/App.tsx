@@ -1,6 +1,6 @@
 /** FireSim V3 — Canadian FBP Wildfire Spread Simulator */
 
-import { useCallback, useState, useMemo } from "react";
+import { useCallback, useState, useMemo, useRef } from "react";
 import MapView from "./components/MapView";
 import WeatherPanel from "./components/WeatherPanel";
 import type { RunParams } from "./components/WeatherPanel";
@@ -9,10 +9,12 @@ import EOCSummary from "./components/EOCSummary";
 import TimeSlider from "./components/TimeSlider";
 import OverlayPanel from "./components/OverlayPanel";
 import type { OverlayLayers, LayerType } from "./components/OverlayPanel";
+import ScenarioPanel from "./components/ScenarioPanel";
 import { FUEL_TYPES } from "./types/simulation";
 import { useSimulation } from "./hooks/useSimulation";
+import { useScenarios } from "./hooks/useScenarios";
 import { computeBurnProbability } from "./services/api";
-import type { SimulationCreate, SimulationFrame, BurnProbabilityRequest, BurnProbabilityResponse } from "./types/simulation";
+import type { SimulationCreate, SimulationFrame, BurnProbabilityRequest, BurnProbabilityResponse, ScenarioConfig } from "./types/simulation";
 
 /**
  * Export burn probability contour polygons as GeoJSON.
@@ -221,6 +223,11 @@ export default function App() {
   const [lastRunParams, setLastRunParams] = useState<RunParams | null>(null);
   const [overlayLayers, setOverlayLayers] = useState<OverlayLayers>(DEFAULT_OVERLAY_LAYERS);
 
+  // ── Scenario management ───────────────────────────────────────────────────
+  const { scenarios, saveScenario, deleteScenario, exportScenario, importScenario } = useScenarios();
+  const [scenarioToLoad, setScenarioToLoad] = useState<ScenarioConfig | null>(null);
+  const currentConfigRef = useRef<Omit<ScenarioConfig, "id" | "createdAt" | "name" | "description"> | null>(null);
+
   // Compute at-risk annotations whenever burn prob data or overlay data changes
   const overlayAnnotated = useMemo(() => {
     const annotate = (data: GeoJSON.FeatureCollection | null) =>
@@ -275,6 +282,27 @@ export default function App() {
   const handleClearIgnition = useCallback(() => {
     setIgnitionPoint(null);
   }, []);
+
+  const handleLoadScenario = useCallback((scenario: ScenarioConfig) => {
+    // Restore ignition point first
+    if (scenario.ignitionPoint) setIgnitionPoint(scenario.ignitionPoint);
+    // Signal WeatherPanel to restore its state
+    setScenarioToLoad(scenario);
+  }, []);
+
+  const handleConfigSnapshot = useCallback(
+    (config: Omit<ScenarioConfig, "id" | "createdAt" | "name" | "description">) => {
+      currentConfigRef.current = config;
+    },
+    []
+  );
+
+  const handleSaveScenario = useCallback(
+    (config: Omit<ScenarioConfig, "id" | "createdAt">) => {
+      saveScenario(config);
+    },
+    [saveScenario]
+  );
 
   const handleStartSimulation = useCallback(
     (params: SimulationCreate) => {
@@ -399,6 +427,8 @@ export default function App() {
             ignitionPoint={ignitionPoint}
             isRunning={isRunning}
             burnProbRunning={burnProbRunning}
+            scenarioToLoad={scenarioToLoad}
+            onConfigSnapshot={handleConfigSnapshot}
           />
           <FireMetrics
             frame={currentFrame}
@@ -426,6 +456,33 @@ export default function App() {
             onLayerLoad={handleOverlayLoad}
             onLayerToggle={handleOverlayToggle}
             onLayerClear={handleOverlayClear}
+          />
+          <ScenarioPanel
+            scenarios={scenarios}
+            currentConfig={currentConfigRef.current ?? {
+              ignitionPoint,
+              weather: { wind_speed: 20, wind_direction: 270, temperature: 25, relative_humidity: 30, precipitation_24h: 0 },
+              fwi: { ffmc: 90, dmc: 45, dc: 300 },
+              fuelType: "C2",
+              useEdmontonGrid: false,
+              useSyntheticCA: false,
+              enableSpotting: false,
+              spottingIntensity: 1.0,
+              includeWater: true,
+              includeBuildings: true,
+              includeWUI: true,
+              includeDEM: true,
+              durationHours: 4,
+              snapshotMinutes: 30,
+              simMode: "single",
+              multiDayDays: [],
+              mcIterations: 50,
+            }}
+            onSave={handleSaveScenario}
+            onLoad={handleLoadScenario}
+            onDelete={deleteScenario}
+            onExport={exportScenario}
+            onImport={importScenario}
           />
         </aside>
 
