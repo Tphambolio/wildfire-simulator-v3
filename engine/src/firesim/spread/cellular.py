@@ -527,7 +527,7 @@ def _make_frame(
 
     return CellularFrame(
         time_hours=elapsed_minutes / 60.0,
-        burned_cells=all_burned_cells,  # all cumulative cells with timestamps
+        burned_cells=list(all_burned_cells),  # snapshot copy — list grows after this call
         total_burned=total,
         new_cells=len(new_burned_cells),
         area_ha=area_ha,
