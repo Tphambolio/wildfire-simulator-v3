@@ -277,39 +277,47 @@ async def compute_burn_probability(params: BurnProbabilityRequest) -> BurnProbab
 
     # Resolve fuel grid path (explicit > env var)
     fuel_path = params.fuel_grid_path or settings.fuel_grid_path
-    if not fuel_path:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Burn probability analysis requires a fuel grid. "
-                "Supply fuel_grid_path in the request or set the "
-                "FIRESIM_FUEL_GRID_PATH environment variable."
-            ),
-        )
-    if not os.path.exists(fuel_path):
+
+    if fuel_path and not os.path.exists(fuel_path):
         raise HTTPException(
             status_code=422,
             detail=f"Fuel grid file not found: {fuel_path!r}",
         )
 
-    # Load fuel grid (runs synchronously — large files may take a moment)
-    try:
-        water_path = params.water_path or settings.water_path
-        buildings_path = params.buildings_path or settings.buildings_path
-        fuel_grid = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: load_fuel_grid(
-                fuel_path,
-                water_path=water_path,
-                buildings_path=buildings_path,
-            ),
+    if fuel_path:
+        # Load real fuel grid from file
+        try:
+            water_path = params.water_path or settings.water_path
+            buildings_path = params.buildings_path or settings.buildings_path
+            fuel_grid = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: load_fuel_grid(
+                    fuel_path,
+                    water_path=water_path,
+                    buildings_path=buildings_path,
+                ),
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to load fuel grid: {exc}") from exc
+    else:
+        # No fuel grid available — generate a synthetic landscape centred on ignition
+        from firesim.data.synthetic_grid import generate_synthetic_fuel_grid
+
+        fuel_grid = generate_synthetic_fuel_grid(
+            ignition_lat=params.ignition_lat,
+            ignition_lng=params.ignition_lng,
+            radius_km=5.0,
+            cell_size_m=50.0,
         )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to load fuel grid: {exc}") from exc
+        logger.info(
+            "Burn probability: synthetic fuel grid generated (%dx%d) around (%.4f, %.4f)",
+            fuel_grid.rows, fuel_grid.cols,
+            params.ignition_lat, params.ignition_lng,
+        )
 
     # Load terrain grid for slope-adjusted spread (optional)
     terrain_grid = None
