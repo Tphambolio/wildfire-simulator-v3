@@ -85,7 +85,22 @@ UPLVI_RASTER_CODES: dict[int, FuelType | None] = {
     32: FuelType.O1b,
 }
 
-# Broad mapping covering both raster types plus standard FBP numeric codes
+# Edmonton canopy LiDAR-derived raster codes (fuel_type.tif from edmonton-burnp3)
+# Classification: Conifer/deciduous RF v2, 20m cells, EPSG:3776
+# Values per fuel_classification_report.txt
+CANOPY_RASTER_CODES: dict[int, FuelType | None] = {
+    0: None,
+    2: FuelType.C2,
+    3: FuelType.C3,
+    12: FuelType.D2,
+    14: FuelType.M2,
+    31: FuelType.O1a,
+    32: FuelType.O1b,
+    98: None,   # Water
+    99: None,   # Non-fuel
+}
+
+# Broad mapping covering all raster types plus standard FBP numeric codes
 ALL_CODES: dict[int, FuelType | None] = {
     -9999: None,
     0: None,
@@ -98,9 +113,10 @@ ALL_CODES: dict[int, FuelType | None] = {
     7: FuelType.C7,
     11: FuelType.D1,
     12: FuelType.D2,
+    14: FuelType.M2,
     22: FuelType.M2,
     31: FuelType.O1a,
-    32: FuelType.S2,
+    32: FuelType.O1b,
     41: FuelType.O1a,
     42: FuelType.O1b,
     99: None,
@@ -116,6 +132,9 @@ def _detect_code_map(unique_codes: set[int]) -> dict[int, FuelType | None]:
     if 22 in unique_codes and 42 not in unique_codes:
         logger.info("Detected uPLVI raster code scheme")
         return UPLVI_RASTER_CODES
+    if 14 in unique_codes and 22 not in unique_codes and 42 not in unique_codes:
+        logger.info("Detected Edmonton canopy LiDAR raster code scheme")
+        return CANOPY_RASTER_CODES
     logger.info("Using broad code mapping (ambiguous raster)")
     return ALL_CODES
 
