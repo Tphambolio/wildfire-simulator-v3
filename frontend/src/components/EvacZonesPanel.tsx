@@ -1,9 +1,9 @@
 /**
- * Evacuation Trigger Zones panel.
+ * Evacuation Trigger Zones panel — Alberta Emergency Management Act model.
  *
- * Displays ICS-style evac zone statistics and allows operators to:
+ * Displays neighbourhood-level evacuation tiers and allows operators to:
  *  - Toggle zone overlay visibility
- *  - Adjust zone boundary scale (0.5× – 2.0×) for manual refinement
+ *  - Adjust zone perimeter expansion (pulls in more/fewer neighbourhoods)
  */
 
 import type { EvacZone, EvacZoneLabel } from "../utils/evacZones";
@@ -39,10 +39,17 @@ export default function EvacZonesPanel({
 }: EvacZonesPanelProps) {
   if (zones.length === 0) return null;
 
+  const totalNeighbourhoods = zones.reduce((s, z) => s + z.communitiesAtRisk.length, 0);
+
   return (
     <div className="panel evac-panel">
       <div className="evac-header">
-        <h3>Evacuation Zones</h3>
+        <div>
+          <h3>Evacuation Zones</h3>
+          {totalNeighbourhoods > 0 && (
+            <span className="evac-total-count">{totalNeighbourhoods} neighbourhood{totalNeighbourhoods !== 1 ? "s" : ""} affected</span>
+          )}
+        </div>
         <button
           className={`ov-vis-btn ${visible ? "on" : "off"}`}
           onClick={() => onToggleVisible(!visible)}
@@ -55,6 +62,8 @@ export default function EvacZonesPanel({
       {ZONE_ORDER.filter((l) => zones.some((z) => z.label === l)).map((label) => {
         const zone = zones.find((z) => z.label === label)!;
         const scale = scales[label];
+        const hasNeighbourhoods = zone.communitiesAtRisk.length > 0;
+
         return (
           <div
             key={label}
@@ -64,33 +73,35 @@ export default function EvacZonesPanel({
               borderLeft: `4px solid ${ZONE_BORDER[label]}`,
             }}
           >
+            {/* Tier header */}
             <div className="evac-zone-title">
-              <span
-                className="evac-zone-dot"
-                style={{ background: zone.color }}
-              />
-              <strong>{label}</strong>
+              <span className="evac-zone-dot" style={{ background: zone.color }} />
+              <div className="evac-zone-title-text">
+                <strong>Evacuation {label}</strong>
+                <span className="evac-zone-action">{zone.action}</span>
+              </div>
               <span className="evac-zone-time">{zone.timeRangeLabel}</span>
             </div>
 
-            <div className="evac-zone-stats">
-              <span>{zone.areaHa.toFixed(0)} ha</span>
-              {zone.communitiesAtRisk.length > 0 && (
-                <span className="evac-zone-pop" title={zone.communitiesAtRisk.join(", ")}>
-                  {zone.communitiesAtRisk.length} communit{zone.communitiesAtRisk.length === 1 ? "y" : "ies"}
-                </span>
-              )}
-            </div>
-
-            {zone.communitiesAtRisk.length > 0 && (
-              <div className="evac-zone-communities">
-                {zone.communitiesAtRisk.slice(0, 4).join(", ")}
-                {zone.communitiesAtRisk.length > 4 && ` +${zone.communitiesAtRisk.length - 4} more`}
-              </div>
+            {/* Neighbourhood list */}
+            {hasNeighbourhoods ? (
+              <ul className="evac-nbhd-list">
+                {zone.communitiesAtRisk.map((name) => (
+                  <li key={name} className="evac-nbhd-item">{name}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="evac-no-nbhd">
+                No neighbourhoods in range
+                {!hasNeighbourhoods && zone.communitiesAtRisk.length === 0
+                  ? " — load communities layer to show affected areas"
+                  : ""}
+              </p>
             )}
 
+            {/* Zone expansion */}
             <div className="evac-zone-scale-row">
-              <span className="evac-scale-label">Boundary scale</span>
+              <span className="evac-scale-label">Zone expansion</span>
               <input
                 type="range"
                 min={0.5}
@@ -116,10 +127,11 @@ export default function EvacZonesPanel({
       })}
 
       <div className="evac-legend">
-        <span style={{ color: "#d32f2f" }}>■</span> Evacuation Order &nbsp;
-        <span style={{ color: "#f57c00" }}>■</span> Alert &nbsp;
-        <span style={{ color: "#f9a825" }}>■</span> Watch
+        <span style={{ color: "#d32f2f" }}>■</span> Order — leave now &nbsp;
+        <span style={{ color: "#f57c00" }}>■</span> Alert — be ready &nbsp;
+        <span style={{ color: "#f9a825" }}>■</span> Watch — monitor
       </div>
+      <div className="evac-authority">Alberta Emergency Management Act</div>
     </div>
   );
 }

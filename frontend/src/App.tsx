@@ -1,6 +1,6 @@
 /** FireSim V3 — Canadian FBP Wildfire Spread Simulator */
 
-import { useCallback, useState, useMemo, useRef } from "react";
+import { useCallback, useState, useMemo, useRef, useEffect } from "react";
 import MapView from "./components/MapView";
 import WeatherPanel from "./components/WeatherPanel";
 import type { RunParams } from "./components/WeatherPanel";
@@ -231,7 +231,7 @@ export default function App() {
   const [evacZoneScales, setEvacZoneScales] = useState<Record<EvacZoneLabel, number>>({
     Order: 1, Alert: 1, Watch: 1,
   });
-  const [isochronesVisible, setIsochronesVisible] = useState(true);
+  const [isochronesVisible, setIsochronesVisible] = useState(false);
   const [isoTargetHours, setIsoTargetHours] = useState<number[]>(DEFAULT_ISO_HOURS);
   const [fuelGridImage, setFuelGridImage] = useState<{ image: string; bounds: [number, number, number, number] } | null>(null);
   const [fuelGridVisible, setFuelGridVisible] = useState(true);
@@ -286,6 +286,14 @@ export default function App() {
   const handleOverlayClear = useCallback((type: LayerType) => {
     setOverlayLayers((prev) => ({ ...prev, [type]: { data: null, visible: true } }));
   }, []);
+
+  // Pre-load Edmonton neighbourhoods on startup so evac zones work immediately.
+  useEffect(() => {
+    fetch("./edmonton/neighbourhoods.geojson")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((fc) => { if (fc) handleOverlayLoad("communities", fc as GeoJSON.FeatureCollection); })
+      .catch(() => {});
+  }, [handleOverlayLoad]);
 
   const {
     status,

@@ -14,6 +14,45 @@ import { evacZonesToGeoJSON } from "../utils/evacZones";
 import type { Isochrone } from "../utils/isochrones";
 import { isochronesToGeoJSON, isochroneLabelsGeoJSON } from "../utils/isochrones";
 
+/** Minimum spot fire HFI (kW/m) to render on the map. Weak spots below this are hidden. */
+const SPOT_HFI_MIN = 300;
+
+/**
+ * Build a curved parabolic arc between two [lng, lat] points.
+ * Uses a quadratic bezier with a perpendicular control point offset so arcs
+ * bow naturally rather than drawing straight-line trajectories.
+ */
+function arcCoords(
+  src: [number, number],
+  dst: [number, number],
+  steps = 10,
+): [number, number][] {
+  const dx = dst[0] - src[0];
+  const dy = dst[1] - src[1];
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len === 0) return [src, dst];
+
+  // Perpendicular unit vector (left of travel direction)
+  const px = -dy / len;
+  const py = dx / len;
+  const arcH = len * 0.32;
+
+  // Quadratic bezier control point
+  const cpX = (src[0] + dst[0]) / 2 + px * arcH;
+  const cpY = (src[1] + dst[1]) / 2 + py * arcH;
+
+  const coords: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const mt = 1 - t;
+    coords.push([
+      mt * mt * src[0] + 2 * mt * t * cpX + t * t * dst[0],
+      mt * mt * src[1] + 2 * mt * t * cpY + t * t * dst[1],
+    ]);
+  }
+  return coords;
+}
+
 /** A simple non-modal toast — disappears after 3 s */
 function MapToast({ message, onDone }: { message: string; onDone: () => void }) {
   useEffect(() => {
@@ -200,7 +239,7 @@ export default function MapView({
   evacZones = [],
   evacZonesVisible = true,
   isochrones = [],
-  isochronesVisible = true,
+  isochronesVisible = false,
   fuelGridImage = null,
   fuelGridVisible = true,
 }: MapViewProps) {
@@ -265,6 +304,7 @@ export default function MapView({
           10000, "#b71c1c",
         ],
         "fill-opacity": 0.5,
+        "fill-outline-color": "transparent",
       },
     });
 
@@ -302,6 +342,9 @@ export default function MapView({
             0.5, 0.09,
             1, 0.18,
           ],
+          // Suppress the 1px auto-outline — the Huygens perimeter has many
+          // self-intersecting vertices whose outline edges create a visual web.
+          "fill-outline-color": "transparent",
         },
       },
       "fire-fill"
@@ -413,6 +456,7 @@ export default function MapView({
 
     // Spot fires source and layers
     if (m.getSource("spot-fires")) {
+      if (m.getLayer("spot-fires-heatmap")) m.removeLayer("spot-fires-heatmap");
       if (m.getLayer("spot-fires-pulse")) m.removeLayer("spot-fires-pulse");
       if (m.getLayer("spot-fires-circle")) m.removeLayer("spot-fires-circle");
       m.removeSource("spot-fires");
@@ -421,11 +465,38 @@ export default function MapView({
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
     });
-    // Outer pulsing ring — radius/opacity animated via requestAnimationFrame
+
+    // ① Landing density heatmap — primary "danger zone" visual (Stitch design)
+    m.addLayer({
+      id: "spot-fires-heatmap",
+      type: "heatmap",
+      source: "spot-fires",
+      paint: {
+        "heatmap-weight": [
+          "interpolate", ["linear"], ["get", "hfi_kw_m"],
+          0, 0, SPOT_HFI_MIN, 0.2, 2000, 0.7, 5000, 1.0,
+        ],
+        "heatmap-intensity": 1.0,
+        "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 9, 20, 13, 45, 16, 70],
+        "heatmap-color": [
+          "interpolate", ["linear"], ["heatmap-density"],
+          0,   "rgba(0,0,0,0)",
+          0.15, "rgba(255,200,50,0.12)",
+          0.35, "rgba(255,140,20,0.28)",
+          0.55, "rgba(255,80,0,0.44)",
+          0.75, "rgba(220,40,0,0.60)",
+          1.0,  "rgba(180,10,0,0.75)",
+        ],
+        "heatmap-opacity": 0.85,
+      },
+    });
+
+    // ② Outer pulsing ring — only on high-intensity spots (HFI >= 1500)
     m.addLayer({
       id: "spot-fires-pulse",
       type: "circle",
       source: "spot-fires",
+      filter: [">=", ["get", "hfi_kw_m"], 1500],
       paint: {
         "circle-radius": 10,
         "circle-color": "transparent",
@@ -435,17 +506,30 @@ export default function MapView({
         "circle-stroke-opacity": 0.8,
       },
     });
-    // Inner solid circle
+
+    // ③ HFI-scaled landing circles — radius and color driven by fire intensity
     m.addLayer({
       id: "spot-fires-circle",
       type: "circle",
       source: "spot-fires",
+      filter: [">=", ["get", "hfi_kw_m"], SPOT_HFI_MIN],
       paint: {
-        "circle-radius": 7,
-        "circle-color": "#ff4500",
-        "circle-stroke-width": 2,
-        "circle-stroke-color": "#ffcc00",
-        "circle-opacity": 0.95,
+        "circle-radius": [
+          "interpolate", ["linear"], ["get", "hfi_kw_m"],
+          SPOT_HFI_MIN, 3,
+          1500, 6,
+          3500, 10,
+          6000, 14,
+        ],
+        "circle-color": [
+          "interpolate", ["linear"], ["get", "hfi_kw_m"],
+          SPOT_HFI_MIN, "#ff9800",
+          2000,         "#ff5722",
+          5000,         "#e53935",
+        ],
+        "circle-stroke-width": 1.5,
+        "circle-stroke-color": "rgba(255,255,255,0.55)",
+        "circle-opacity": 0.92,
         "circle-stroke-opacity": 1,
       },
     });
@@ -486,62 +570,26 @@ export default function MapView({
     };
     pulseAnimRef.current = requestAnimationFrame(animatePulse);
 
-    // Ember trajectory lines (source crown front → spot fire landing)
-    if (m.getSource("ember-trajectories")) {
-      if (m.getLayer("ember-lines")) m.removeLayer("ember-lines");
-      if (m.getLayer("ember-arrows")) m.removeLayer("ember-arrows");
-      m.removeSource("ember-trajectories");
-    }
+    // ember-trajectories / ember-lines intentionally not created — arcs add visual clutter.
 
-    // Build a right-pointing arrowhead as a canvas image for use on line symbols
-    if (!m.hasImage("ember-arrow")) {
-      const sz = 16;
-      const canvas = document.createElement("canvas");
-      canvas.width = sz; canvas.height = sz;
-      const ctx = canvas.getContext("2d")!;
-      ctx.fillStyle = "#ff8c00";
-      ctx.globalAlpha = 0.9;
-      ctx.beginPath();
-      ctx.moveTo(sz, sz / 2);   // tip → right
-      ctx.lineTo(0, 0);         // top-left
-      ctx.lineTo(sz * 0.3, sz / 2); // notch
-      ctx.lineTo(0, sz);        // bottom-left
-      ctx.closePath();
-      ctx.fill();
-      const imgData = ctx.getImageData(0, 0, sz, sz);
-      m.addImage("ember-arrow", { width: sz, height: sz, data: new Uint8ClampedArray(imgData.data) });
+    // ── Ember source dots — small deep-red circles at the origin on the fire front ──
+    if (m.getSource("ember-sources")) {
+      if (m.getLayer("ember-source-dots")) m.removeLayer("ember-source-dots");
+      m.removeSource("ember-sources");
     }
-
-    m.addSource("ember-trajectories", {
+    m.addSource("ember-sources", {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
     });
     m.addLayer({
-      id: "ember-lines",
-      type: "line",
-      source: "ember-trajectories",
+      id: "ember-source-dots",
+      type: "circle",
+      source: "ember-sources",
       paint: {
-        "line-color": "#ff8c00",
-        "line-width": 1.5,
-        "line-opacity": 0.55,
-        "line-dasharray": [3, 2],
-      },
-    });
-    m.addLayer({
-      id: "ember-arrows",
-      type: "symbol",
-      source: "ember-trajectories",
-      layout: {
-        "symbol-placement": "line",
-        "symbol-spacing": 80,
-        "icon-image": "ember-arrow",
-        "icon-size": 0.9,
-        "icon-keep-upright": false,
-        "icon-allow-overlap": true,
-        "icon-rotation-alignment": "map",
-      },
-      paint: {
-        "icon-opacity": 0.85,
+        "circle-radius": 3,
+        "circle-color": "#b71c1c",
+        "circle-opacity": 0.7,
+        "circle-stroke-width": 0,
       },
     });
 
@@ -649,13 +697,13 @@ export default function MapView({
         id: `${zoneId}-fill`,
         type: "fill",
         source: zoneId,
-        paint: { "fill-color": color, "fill-opacity": 0.22 },
-      });
-      m.addLayer({
-        id: `${zoneId}-outline`,
-        type: "line",
-        source: zoneId,
-        paint: { "line-color": color, "line-width": 1.5, "line-opacity": 0.55 },
+        paint: {
+          "fill-color": color,
+          "fill-opacity": 0.28,
+          // Suppress the auto 1px outline — self-intersecting Huygens vertices
+          // cause it to render as a dense orange web across the map.
+          "fill-outline-color": "transparent",
+        },
       });
     }
 
@@ -841,7 +889,7 @@ export default function MapView({
         ?.setData({ type: "FeatureCollection", features: [] });
       (map.current.getSource("spot-fires") as maplibregl.GeoJSONSource | undefined)
         ?.setData({ type: "FeatureCollection", features: [] });
-      (map.current.getSource("ember-trajectories") as maplibregl.GeoJSONSource | undefined)
+      (map.current.getSource("ember-sources") as maplibregl.GeoJSONSource | undefined)
         ?.setData({ type: "FeatureCollection", features: [] });
       return;
     }
@@ -871,9 +919,8 @@ export default function MapView({
       const histSrc = map.current.getSource("fire-history") as maplibregl.GeoJSONSource | undefined;
       if (histSrc) histSrc.setData({ type: "FeatureCollection", features: [] });
 
-      // Update spot fires + ember trajectories — accumulate up to current frame
+      // Spot fire landing zones — accumulate across all frames for the heat blob
       const spotSrcCA = map.current.getSource("spot-fires") as maplibregl.GeoJSONSource | undefined;
-      const trajSrcCA = map.current.getSource("ember-trajectories") as maplibregl.GeoJSONSource | undefined;
       const allSpotFiresCA = frames.slice(0, currentFrameIndex + 1).flatMap((f) => f.spot_fires ?? []);
       if (spotSrcCA) {
         spotSrcCA.setData({
@@ -885,19 +932,21 @@ export default function MapView({
           })),
         });
       }
-      if (trajSrcCA) {
-        trajSrcCA.setData({
+
+      // Ember source dots — top 15 launch points by HFI from current frame
+      const srcDotsSrcCA = map.current.getSource("ember-sources") as maplibregl.GeoJSONSource | undefined;
+      const frameSpotsCA = (currentFrame.spot_fires ?? [])
+        .filter((sf) => sf.source_lat != null && sf.source_lng != null && sf.hfi_kw_m >= SPOT_HFI_MIN)
+        .sort((a, b) => b.hfi_kw_m - a.hfi_kw_m)
+        .slice(0, 15);
+      if (srcDotsSrcCA) {
+        srcDotsSrcCA.setData({
           type: "FeatureCollection",
-          features: allSpotFiresCA
-            .filter((sf) => sf.source_lat != null && sf.source_lng != null)
-            .map((sf) => ({
-              type: "Feature" as const,
-              geometry: {
-                type: "LineString" as const,
-                coordinates: [[sf.source_lng!, sf.source_lat!], [sf.lng, sf.lat]],
-              },
-              properties: { distance_m: sf.distance_m, hfi_kw_m: sf.hfi_kw_m },
-            })),
+          features: frameSpotsCA.map((sf) => ({
+            type: "Feature" as const,
+            geometry: { type: "Point" as const, coordinates: [sf.source_lng!, sf.source_lat!] },
+            properties: { hfi_kw_m: sf.hfi_kw_m },
+          })),
         });
       }
       return;
@@ -908,7 +957,31 @@ export default function MapView({
     if (!src) return;
     if (currentFrame.perimeter.length < 3) return;
 
-    const coords = currentFrame.perimeter.map(([lat, lng]) => [lng, lat]);
+    const rawCoords = currentFrame.perimeter.map(([lat, lng]) => [lng, lat]);
+
+    // Convex hull (Andrew's monotone chain) — guarantees a valid simple polygon
+    // with no self-intersections, preventing WebGL tessellator spike triangles.
+    const convexHull = (pts: number[][]): number[][] => {
+      if (pts.length < 3) return pts;
+      const sorted = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const cross = (o: number[], a: number[], b: number[]) =>
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+      const lower: number[][] = [];
+      for (const p of sorted) {
+        while (lower.length >= 2 && cross(lower[lower.length-2], lower[lower.length-1], p) <= 0) lower.pop();
+        lower.push(p);
+      }
+      const upper: number[][] = [];
+      for (let i = sorted.length - 1; i >= 0; i--) {
+        const p = sorted[i];
+        while (upper.length >= 2 && cross(upper[upper.length-2], upper[upper.length-1], p) <= 0) upper.pop();
+        upper.push(p);
+      }
+      upper.pop(); lower.pop();
+      return [...lower, ...upper];
+    };
+
+    const coords = convexHull(rawCoords);
     if (
       coords.length > 1 &&
       (coords[0][0] !== coords[coords.length - 1][0] ||
@@ -931,7 +1004,8 @@ export default function MapView({
 
     const historySlice = frames.slice(1, currentFrameIndex).filter((f) => f.perimeter.length >= 3);
     const historyFeatures: GeoJSON.Feature[] = historySlice.map((f, idx, arr) => {
-      const c = f.perimeter.map(([lat, lng]) => [lng, lat]);
+      const raw = f.perimeter.map(([lat, lng]) => [lng, lat]);
+      const c = convexHull(raw);
       if (c.length > 1 && (c[0][0] !== c[c.length - 1][0] || c[0][1] !== c[c.length - 1][1])) {
         c.push(c[0]);
       }
@@ -952,9 +1026,8 @@ export default function MapView({
     const heatSrc = map.current.getSource("fire-heatmap") as maplibregl.GeoJSONSource | undefined;
     if (heatSrc) heatSrc.setData({ type: "FeatureCollection", features: [] });
 
-    // Update spot fires + ember trajectories — accumulate up to current frame
+    // Spot fire landing zones — accumulate across all frames for the heat blob
     const spotSrc = map.current.getSource("spot-fires") as maplibregl.GeoJSONSource | undefined;
-    const trajSrc = map.current.getSource("ember-trajectories") as maplibregl.GeoJSONSource | undefined;
     const allSpotFires = frames.slice(0, currentFrameIndex + 1).flatMap((f) => f.spot_fires ?? []);
     if (spotSrc) {
       spotSrc.setData({
@@ -966,19 +1039,22 @@ export default function MapView({
         })),
       });
     }
-    if (trajSrc) {
-      trajSrc.setData({
+
+    // Ember source dots — top 15 launch points by HFI from current frame
+    // (arcs removed: heatmap + circles tell the landing story; arcs only add clutter)
+    const srcDotsSrc = map.current.getSource("ember-sources") as maplibregl.GeoJSONSource | undefined;
+    const frameSpots = (currentFrame.spot_fires ?? [])
+      .filter((sf) => sf.source_lat != null && sf.source_lng != null && sf.hfi_kw_m >= SPOT_HFI_MIN)
+      .sort((a, b) => b.hfi_kw_m - a.hfi_kw_m)
+      .slice(0, 15);
+    if (srcDotsSrc) {
+      srcDotsSrc.setData({
         type: "FeatureCollection",
-        features: allSpotFires
-          .filter((sf) => sf.source_lat != null && sf.source_lng != null)
-          .map((sf) => ({
-            type: "Feature" as const,
-            geometry: {
-              type: "LineString" as const,
-              coordinates: [[sf.source_lng!, sf.source_lat!], [sf.lng, sf.lat]],
-            },
-            properties: { distance_m: sf.distance_m, hfi_kw_m: sf.hfi_kw_m },
-          })),
+        features: frameSpots.map((sf) => ({
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [sf.source_lng!, sf.source_lat!] },
+          properties: { hfi_kw_m: sf.hfi_kw_m },
+        })),
       });
     }
   }, [frames, currentFrameIndex, mapReady, fireLayersVersion]);
@@ -1028,9 +1104,8 @@ export default function MapView({
   useEffect(() => {
     if (!map.current || !mapReady) return;
     const visibility = showSpotFires ? "visible" : "none";
-    if (map.current.getLayer("spot-fires-circle")) {
-      map.current.setLayoutProperty("spot-fires-circle", "visibility", visibility);
-      map.current.setLayoutProperty("spot-fires-pulse", "visibility", visibility);
+    for (const id of ["spot-fires-circle", "spot-fires-pulse", "spot-fires-heatmap", "ember-source-dots"]) {
+      if (map.current.getLayer(id)) map.current.setLayoutProperty(id, "visibility", visibility);
     }
   }, [showSpotFires, mapReady]);
 
@@ -1044,7 +1119,8 @@ export default function MapView({
     const fireLayers = [
       "fire-fill", "fire-outline", "fire-history-fill",
       "fire-heatmap-layer", "fire-cells-layer",
-      "spot-fires-circle", "spot-fires-pulse",
+      "spot-fires-heatmap", "spot-fires-circle", "spot-fires-pulse",
+      "ember-source-dots",
     ];
 
     burnLayers.forEach((id) => {
@@ -1132,6 +1208,11 @@ export default function MapView({
   useEffect(() => {
     if (!map.current || !mapReady) return;
     const m = map.current;
+    // Remove stale outline layers — they may still exist if the map was initialized
+    // with an older version of addFireLayers before this session's code changes.
+    for (const id of ["evac-watch-outline", "evac-alert-outline", "evac-order-outline"]) {
+      if (m.getLayer(id)) m.removeLayer(id);
+    }
     const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
     const zoneMap: Record<string, string> = { Watch: "evac-watch", Alert: "evac-alert", Order: "evac-order" };
     // Clear all first, then populate from props
@@ -1161,9 +1242,7 @@ export default function MapView({
     const m = map.current;
     const vis = evacZonesVisible ? "visible" : "none";
     for (const id of [
-      "evac-watch-fill", "evac-watch-outline",
-      "evac-alert-fill", "evac-alert-outline",
-      "evac-order-fill", "evac-order-outline",
+      "evac-watch-fill", "evac-alert-fill", "evac-order-fill",
     ]) {
       if (m.getLayer(id)) m.setLayoutProperty(id, "visibility", vis);
     }
@@ -1247,24 +1326,6 @@ export default function MapView({
               </div>
             ))}
           </div>
-        </div>
-      )}
-      {/* Evacuation Zone Legend */}
-      {evacZones && evacZones.length > 0 && evacZonesVisible && (
-        <div className="evac-map-legend">
-          <div className="evac-map-legend-title">Evacuation Zones</div>
-          {[
-            { label: "Order (0–2 h)",  color: "#d32f2f" },
-            { label: "Alert (2–6 h)",  color: "#f57c00" },
-            { label: "Watch (6–12 h)", color: "#f9a825" },
-          ].filter(({ label }) =>
-            evacZones.some((z) => label.startsWith(z.label))
-          ).map(({ label, color }) => (
-            <div key={label} className="evac-map-legend-row">
-              <div className="evac-map-legend-swatch" style={{ background: color, opacity: 0.8 }} />
-              <span>{label}</span>
-            </div>
-          ))}
         </div>
       )}
       {/* ── Map controls panel — bottom-right glass panel ───── */}

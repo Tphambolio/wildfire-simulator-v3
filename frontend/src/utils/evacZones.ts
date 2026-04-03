@@ -1,12 +1,17 @@
 /**
- * Evacuation trigger zone utilities.
+ * Evacuation trigger zone utilities — Alberta Emergency Management Act model.
  *
- * Derives ICS-style evacuation zones from simulation frame perimeters:
- *   Order  (red)    — 0–2 h spread perimeter
- *   Alert  (orange) — 2–6 h spread perimeter
- *   Watch  (yellow) — 6–12 h spread perimeter
+ * Three-tier ICS/EOC structure (standard in AB municipalities):
+ *   Order  (red)    — 0–2 h perimeter  — LEAVE NOW
+ *   Alert  (orange) — 2–6 h perimeter  — BE READY (~30 min)
+ *   Watch  (yellow) — 6–12 h perimeter — MONITOR SITUATION
  *
- * All perimeter coords are [[lat, lng], ...] (engine convention).
+ * Zones are neighbourhood-based (Option A): each tier highlights the complete
+ * neighbourhood polygons whose centroids fall inside the projected fire perimeter
+ * at that time horizon. Tiers are exclusive — a neighbourhood assigned to Order
+ * does not reappear in Alert or Watch.
+ *
+ * All engine perimeter coords are [[lat, lng], ...].
  * GeoJSON coords are [lng, lat].
  */
 
@@ -18,12 +23,16 @@ export interface EvacZone {
   label: EvacZoneLabel;
   /** Display colour (CSS) */
   color: string;
+  /** AEMA action description */
+  action: string;
   timeRangeLabel: string;
-  /** Perimeter in engine [[lat, lng]] format */
+  /** Perimeter used for intersection test (engine [[lat, lng]] format, scaled) */
   perimeter: number[][];
   areaHa: number;
-  /** Community features that fall inside this zone */
+  /** Neighbourhood names in this tier (for panel display) */
   communitiesAtRisk: string[];
+  /** Actual GeoJSON features for this tier (for map rendering) */
+  communitiesFeatures: GeoJSON.Feature[];
   /** Scale factor applied by the operator (1.0 = no change) */
   scale: number;
 }
@@ -32,11 +41,12 @@ const ZONE_DEFS: Array<{
   label: EvacZoneLabel;
   targetHours: number;
   color: string;
+  action: string;
   timeRangeLabel: string;
 }> = [
-  { label: "Order", targetHours: 2,  color: "#d32f2f", timeRangeLabel: "0–2 h" },
-  { label: "Alert", targetHours: 6,  color: "#f57c00", timeRangeLabel: "2–6 h" },
-  { label: "Watch", targetHours: 12, color: "#f9a825", timeRangeLabel: "6–12 h" },
+  { label: "Order", targetHours: 2,  color: "#d32f2f", action: "LEAVE NOW",          timeRangeLabel: "0–2 h" },
+  { label: "Alert", targetHours: 6,  color: "#f57c00", action: "BE READY (~30 min)", timeRangeLabel: "2–6 h" },
+  { label: "Watch", targetHours: 12, color: "#f9a825", action: "MONITOR SITUATION",  timeRangeLabel: "6–12 h" },
 ];
 
 /** Pick the frame whose time_hours is closest to target, with at least 3 perimeter points. */
@@ -53,11 +63,10 @@ function closestFrame(frames: SimulationFrame[], targetHours: number): Simulatio
 
 /**
  * Scale a polygon outward or inward around its centroid.
- * factor > 1 expands, factor < 1 contracts.
+ * factor > 1 expands the perimeter (pulls in more neighbourhoods).
  */
 function scalePolygon(perimeter: number[][], factor: number): number[][] {
   if (factor === 1 || perimeter.length === 0) return perimeter;
-  // Centroid (lat/lng)
   let sumLat = 0, sumLng = 0;
   for (const [lat, lng] of perimeter) { sumLat += lat; sumLng += lng; }
   const cLat = sumLat / perimeter.length;
@@ -84,15 +93,10 @@ function pointInPolygon(latPt: number, lngPt: number, ring: number[][]): boolean
   return inside;
 }
 
-/** Extract a representative lat/lng from a GeoJSON geometry (centroid approximation). */
+/** Extract a representative lat/lng centroid from a GeoJSON geometry. */
 function geometryCentroid(g: GeoJSON.Geometry): [number, number] | null {
-  if (g.type === "Point") {
-    return [g.coordinates[1], g.coordinates[0]];
-  }
-  if (g.type === "MultiPoint") {
-    const [lng, lat] = g.coordinates[0];
-    return [lat, lng];
-  }
+  if (g.type === "Point") return [g.coordinates[1], g.coordinates[0]];
+  if (g.type === "MultiPoint") { const [lng, lat] = g.coordinates[0]; return [lat, lng]; }
   if (g.type === "Polygon" && g.coordinates[0].length > 0) {
     let sLat = 0, sLng = 0;
     const ring = g.coordinates[0];
@@ -118,30 +122,28 @@ function featureName(f: GeoJSON.Feature): string {
 }
 
 /**
- * Compute the communities that fall within a zone perimeter (engine [[lat,lng]] coords).
+ * Find community features whose centroid falls inside the zone perimeter.
+ * Returns actual GeoJSON features (not just names) for map rendering.
  */
 function communitiesInZone(
   perimeter: number[][],
   communities: GeoJSON.FeatureCollection | null | undefined,
-): string[] {
+): GeoJSON.Feature[] {
   if (!communities || perimeter.length < 3) return [];
-  const names: string[] = [];
+  const result: GeoJSON.Feature[] = [];
   for (const feat of communities.features) {
     const c = geometryCentroid(feat.geometry);
     if (!c) continue;
-    if (pointInPolygon(c[0], c[1], perimeter)) {
-      names.push(featureName(feat));
-    }
+    if (pointInPolygon(c[0], c[1], perimeter)) result.push(feat);
   }
-  return names;
+  return result;
 }
 
 // ── Polygon area via shoelace (approximate, degrees²→ ha) ───────────────────
 
 function polygonAreaHa(perimeter: number[][]): number {
   if (perimeter.length < 3) return 0;
-  // Convert to approximate metres using mid-latitude scaling
-  const latScale = 111320; // m per degree latitude
+  const latScale = 111320;
   const midLat = perimeter.reduce((s, [lat]) => s + lat, 0) / perimeter.length;
   const lngScale = 111320 * Math.cos((midLat * Math.PI) / 180);
   let area = 0;
@@ -150,7 +152,7 @@ function polygonAreaHa(perimeter: number[][]): number {
     area += (perimeter[j][1] * lngScale) * (perimeter[i][0] * latScale);
     area -= (perimeter[i][1] * lngScale) * (perimeter[j][0] * latScale);
   }
-  return Math.abs(area) / 2 / 10_000; // m² → ha
+  return Math.abs(area) / 2 / 10_000;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -158,8 +160,9 @@ function polygonAreaHa(perimeter: number[][]): number {
 /**
  * Derive evacuation zones from simulation frames.
  *
- * Returns up to 3 zones; a zone is omitted if no frame is close enough
- * to its target time bucket (must be within the simulation duration).
+ * Zones are neighbourhood-based and exclusive: each neighbourhood appears in
+ * at most one tier (the highest-urgency tier whose perimeter contains it).
+ * Returns up to 3 zones; a zone is omitted if beyond the simulation duration.
  */
 export function computeEvacZones(
   frames: SimulationFrame[],
@@ -170,21 +173,32 @@ export function computeEvacZones(
 
   const maxHours = frames[frames.length - 1].time_hours;
   const zones: EvacZone[] = [];
+  // Track which neighbourhood names have been assigned to a closer tier
+  const assignedNames = new Set<string>();
 
   for (const def of ZONE_DEFS) {
-    if (def.targetHours > maxHours + 1) continue; // beyond simulation range
+    if (def.targetHours > maxHours + 1) continue;
     const frame = closestFrame(frames, def.targetHours);
     if (!frame) continue;
 
     const scale = scales[def.label] ?? 1;
     const scaled = scalePolygon(frame.perimeter, scale);
+
+    // All features inside this perimeter
+    const allFeatures = communitiesInZone(scaled, communities);
+    // Exclusive: exclude any already assigned to a higher-urgency tier
+    const exclusiveFeatures = allFeatures.filter((f) => !assignedNames.has(featureName(f)));
+    exclusiveFeatures.forEach((f) => assignedNames.add(featureName(f)));
+
     zones.push({
       label: def.label,
       color: def.color,
+      action: def.action,
       timeRangeLabel: def.timeRangeLabel,
       perimeter: scaled,
       areaHa: polygonAreaHa(scaled),
-      communitiesAtRisk: communitiesInZone(scaled, communities),
+      communitiesAtRisk: exclusiveFeatures.map(featureName),
+      communitiesFeatures: exclusiveFeatures,
       scale,
     });
   }
@@ -193,35 +207,29 @@ export function computeEvacZones(
 }
 
 /**
- * Convert evac zones to a GeoJSON FeatureCollection
- * (for export and map rendering). Coords in [lng, lat] order.
+ * Convert evac zones to a GeoJSON FeatureCollection for map rendering and export.
+ *
+ * Each feature is an actual neighbourhood polygon tagged with its zone tier.
+ * If a zone has no community features (communities layer not loaded), it is
+ * omitted from the output.
  */
 export function evacZonesToGeoJSON(zones: EvacZone[]): GeoJSON.FeatureCollection {
-  const features: GeoJSON.Feature[] = zones.map((z) => {
-    const coords = z.perimeter.map(([lat, lng]) => [lng, lat]);
-    if (
-      coords.length > 1 &&
-      (coords[0][0] !== coords[coords.length - 1][0] ||
-        coords[0][1] !== coords[coords.length - 1][1])
-    ) {
-      coords.push(coords[0]);
+  const features: GeoJSON.Feature[] = [];
+  for (const zone of zones) {
+    for (const f of zone.communitiesFeatures) {
+      features.push({
+        type: "Feature" as const,
+        geometry: f.geometry,
+        properties: {
+          ...(f.properties ?? {}),
+          zone_label: zone.label,
+          zone_color: zone.color,
+          zone_action: zone.action,
+          time_range: zone.timeRangeLabel,
+          neighbourhood: featureName(f),
+        },
+      });
     }
-    return {
-      type: "Feature" as const,
-      properties: {
-        zone_label: z.label,
-        zone_color: z.color,
-        time_range: z.timeRangeLabel,
-        area_ha: +z.areaHa.toFixed(1),
-        communities_at_risk: z.communitiesAtRisk.join(", "),
-        communities_count: z.communitiesAtRisk.length,
-        scale_applied: z.scale,
-      },
-      geometry: {
-        type: "Polygon" as const,
-        coordinates: [coords],
-      },
-    };
-  });
+  }
   return { type: "FeatureCollection", features };
 }

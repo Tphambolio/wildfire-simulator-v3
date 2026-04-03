@@ -1752,16 +1752,22 @@ select {
 
 .evac-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 8px;
 }
 
 .evac-header h3 {
-  margin: 0;
+  margin: 0 0 2px;
   font-size: 0.92em;
   color: var(--text-primary);
   letter-spacing: 0.02em;
+}
+
+.evac-total-count {
+  font-size: 0.72em;
+  color: #f9a825;
+  font-weight: 600;
 }
 
 .evac-zone-card {
@@ -1774,7 +1780,7 @@ select {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .evac-zone-dot {
@@ -1784,15 +1790,53 @@ select {
   flex-shrink: 0;
 }
 
+.evac-zone-title-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
 .evac-zone-title strong {
   font-size: 0.9em;
   color: var(--text-primary);
+}
+
+.evac-zone-action {
+  font-size: 0.68em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #ffb59d;
+  text-transform: uppercase;
 }
 
 .evac-zone-time {
   font-size: 0.75em;
   color: #889;
   margin-left: auto;
+}
+
+.evac-nbhd-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.evac-nbhd-item {
+  font-size: 0.8em;
+  color: #ccd;
+  padding: 2px 6px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 3px;
+}
+
+.evac-no-nbhd {
+  font-size: 0.75em;
+  color: #667;
+  margin: 0 0 6px;
+  font-style: italic;
 }
 
 .evac-zone-stats {
@@ -1862,6 +1906,14 @@ select {
   color: #778;
   margin-top: 6px;
   text-align: center;
+}
+
+.evac-authority {
+  font-size: 0.65em;
+  color: #556;
+  text-align: center;
+  margin-top: 3px;
+  letter-spacing: 0.03em;
 }
 
 /* ── Evac Zone Map Legend ─────────────────────────────────────────────── */
