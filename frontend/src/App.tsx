@@ -312,10 +312,15 @@ export default function App() {
     [startPerimeterOverride]
   );
 
-  // Compute evac zones from simulation frames (updates live as frames arrive)
+  // Compute evac zones from frames up to the current scrubber position — time-aware.
+  // Only communities threatened by fire up to currentFrameIndex are shown.
   const evacZones = useMemo(
-    () => computeEvacZones(frames, overlayLayers.communities.data, evacZoneScales),
-    [frames, overlayLayers.communities.data, evacZoneScales],
+    () => computeEvacZones(
+      frames.slice(0, currentFrameIndex + 1),
+      overlayLayers.communities.data,
+      evacZoneScales,
+    ),
+    [frames, currentFrameIndex, overlayLayers.communities.data, evacZoneScales],
   );
 
   // Compute arrival time isochrones from simulation frames

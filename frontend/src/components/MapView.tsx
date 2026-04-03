@@ -230,7 +230,7 @@ export default function MapView({
       m.removeSource("fire-perimeter");
     }
     if (m.getSource("fire-history")) {
-      if (m.getLayer("fire-history-outline")) m.removeLayer("fire-history-outline");
+      if (m.getLayer("fire-history-fill")) m.removeLayer("fire-history-fill");
       m.removeSource("fire-history");
     }
     // Remove CA heatmap layers if present
@@ -283,16 +283,25 @@ export default function MapView({
       data: { type: "FeatureCollection", features: [] },
     });
 
+    // Heat-scar fill: semi-transparent fills ordered oldest→newest.
+    // Recency (0=oldest, 1=most-recent history) drives opacity and color.
     m.addLayer(
       {
-        id: "fire-history-outline",
-        type: "line",
+        id: "fire-history-fill",
+        type: "fill",
         source: "fire-history",
         paint: {
-          "line-color": "#ff9800",
-          "line-width": 1,
-          "line-opacity": 0.5,
-          "line-dasharray": [2, 2],
+          "fill-color": [
+            "interpolate", ["linear"], ["get", "recency"],
+            0, "#e65100",
+            1, "#ff3d00",
+          ],
+          "fill-opacity": [
+            "interpolate", ["linear"], ["get", "recency"],
+            0, 0.04,
+            0.5, 0.09,
+            1, 0.18,
+          ],
         },
       },
       "fire-fill"
@@ -640,13 +649,13 @@ export default function MapView({
         id: `${zoneId}-fill`,
         type: "fill",
         source: zoneId,
-        paint: { "fill-color": color, "fill-opacity": 0.18 },
+        paint: { "fill-color": color, "fill-opacity": 0.22 },
       });
       m.addLayer({
         id: `${zoneId}-outline`,
         type: "line",
         source: zoneId,
-        paint: { "line-color": color, "line-width": 2.5, "line-opacity": 0.85, "line-dasharray": [4, 2] },
+        paint: { "line-color": color, "line-width": 1.5, "line-opacity": 0.55 },
       });
     }
 
@@ -920,20 +929,22 @@ export default function MapView({
     const historySrc = map.current.getSource("fire-history") as maplibregl.GeoJSONSource | undefined;
     if (!historySrc) return;
 
-    const historyFeatures: GeoJSON.Feature[] = frames
-      .slice(1, currentFrameIndex)
-      .filter((f) => f.perimeter.length >= 3)
-      .map((f) => {
-        const c = f.perimeter.map(([lat, lng]) => [lng, lat]);
-        if (c.length > 1 && (c[0][0] !== c[c.length - 1][0] || c[0][1] !== c[c.length - 1][1])) {
-          c.push(c[0]);
-        }
-        return {
-          type: "Feature" as const,
-          geometry: { type: "Polygon" as const, coordinates: [c] },
-          properties: { time_hours: f.time_hours },
-        };
-      });
+    const historySlice = frames.slice(1, currentFrameIndex).filter((f) => f.perimeter.length >= 3);
+    const historyFeatures: GeoJSON.Feature[] = historySlice.map((f, idx, arr) => {
+      const c = f.perimeter.map(([lat, lng]) => [lng, lat]);
+      if (c.length > 1 && (c[0][0] !== c[c.length - 1][0] || c[0][1] !== c[c.length - 1][1])) {
+        c.push(c[0]);
+      }
+      return {
+        type: "Feature" as const,
+        geometry: { type: "Polygon" as const, coordinates: [c] },
+        properties: {
+          time_hours: f.time_hours,
+          // recency: 0 = oldest ring, 1 = ring just before current — drives heat-scar opacity
+          recency: arr.length > 1 ? idx / (arr.length - 1) : 1,
+        },
+      };
+    });
 
     historySrc.setData({ type: "FeatureCollection", features: historyFeatures });
 
@@ -1031,7 +1042,7 @@ export default function MapView({
 
     const burnLayers = ["burn-probability-layer", "burn-probability-circles"];
     const fireLayers = [
-      "fire-fill", "fire-outline", "fire-history-outline",
+      "fire-fill", "fire-outline", "fire-history-fill",
       "fire-heatmap-layer", "fire-cells-layer",
       "spot-fires-circle", "spot-fires-pulse",
     ];
