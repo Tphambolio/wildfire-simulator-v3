@@ -16,8 +16,9 @@ import { useSimulation } from "./hooks/useSimulation";
 import { useScenarios } from "./hooks/useScenarios";
 import { computeBurnProbability, fetchFuelGridImage } from "./services/api";
 import type { SimulationCreate, SimulationFrame, BurnProbabilityRequest, BurnProbabilityResponse, ScenarioConfig, PerimeterOverrideRequest } from "./types/simulation";
-import { computeEvacZones } from "./utils/evacZones";
+import { computeEvacZones, applyZoneHistory } from "./utils/evacZones";
 import type { EvacZoneLabel } from "./utils/evacZones";
+import EOCConsole from "./components/EOCConsole";
 import IsochronePanel from "./components/IsochronePanel";
 import { computeIsochrones, DEFAULT_ISO_HOURS } from "./utils/isochrones";
 import PerimeterOverridePanel from "./components/PerimeterOverridePanel";
@@ -231,6 +232,11 @@ export default function App() {
   const [evacZoneScales, setEvacZoneScales] = useState<Record<EvacZoneLabel, number>>({
     Order: 1, Alert: 1, Watch: 1,
   });
+  // Committed zone history: tracks the highest tier each neighbourhood has ever reached
+  // (Order + Alert only — Watch is always dynamic)
+  const [committedEvacHistory, setCommittedEvacHistory] = useState<Map<string, EvacZoneLabel>>(new Map());
+  // Active top-level tab
+  const [activeTab, setActiveTab] = useState<"simulation" | "eoc">("simulation");
   const [isochronesVisible, setIsochronesVisible] = useState(false);
   const [isoTargetHours, setIsoTargetHours] = useState<number[]>(DEFAULT_ISO_HOURS);
   const [fuelGridImage, setFuelGridImage] = useState<{ image: string; bounds: [number, number, number, number] } | null>(null);
@@ -331,6 +337,38 @@ export default function App() {
     [frames, currentFrameIndex, overlayLayers.communities.data, evacZoneScales],
   );
 
+  // Reset committed history when a new simulation starts (frames array resets to empty)
+  useEffect(() => {
+    if (frames.length === 0) setCommittedEvacHistory(new Map());
+  }, [frames.length]);
+
+  // Accumulate Order + Alert zones into committed history (Watch is never committed)
+  useEffect(() => {
+    if (evacZones.length === 0) return;
+    const TIER_RANK: Record<EvacZoneLabel, number> = { Order: 3, Alert: 2, Watch: 1 };
+    setCommittedEvacHistory((prev) => {
+      const next = new Map(prev);
+      let changed = false;
+      for (const zone of evacZones) {
+        if (zone.label === "Watch") continue;
+        for (const name of zone.communitiesAtRisk) {
+          const prevRank = TIER_RANK[next.get(name) ?? "Watch"];
+          if (TIER_RANK[zone.label] > prevRank) {
+            next.set(name, zone.label);
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [evacZones]);
+
+  // Apply committed history so Order/Alert zones persist across scrubber movement
+  const persistedEvacZones = useMemo(
+    () => applyZoneHistory(evacZones, committedEvacHistory, overlayLayers.communities.data),
+    [evacZones, committedEvacHistory, overlayLayers.communities.data],
+  );
+
   // Compute arrival time isochrones from simulation frames
   const isochrones = useMemo(
     () => computeIsochrones(frames, isoTargetHours),
@@ -422,22 +460,24 @@ export default function App() {
             status={status}
             totalFrames={frames.length}
           />
-          <EOCSummary
-            frames={frames}
-            burnProbData={burnProbabilityData}
-            runParams={lastRunParams}
-            ignitionPoint={ignitionPoint}
-            fuelTypeLabel={
-              lastRunParams?.fuel_type
-                ? `${lastRunParams.fuel_type} — ${FUEL_TYPES[lastRunParams.fuel_type] ?? ""}`
-                : undefined
-            }
-            atRiskCounts={overlayAtRiskCounts}
-            overlayRoads={overlayAnnotated.roads.annotated as GeoJSON.FeatureCollection | null}
-            overlayCommunities={overlayAnnotated.communities.annotated as GeoJSON.FeatureCollection | null}
-            overlayInfrastructure={overlayAnnotated.infrastructure.annotated as GeoJSON.FeatureCollection | null}
-            evacZones={evacZones}
-          />
+          {activeTab === "simulation" && (
+            <EOCSummary
+              frames={frames}
+              burnProbData={burnProbabilityData}
+              runParams={lastRunParams}
+              ignitionPoint={ignitionPoint}
+              fuelTypeLabel={
+                lastRunParams?.fuel_type
+                  ? `${lastRunParams.fuel_type} — ${FUEL_TYPES[lastRunParams.fuel_type] ?? ""}`
+                  : undefined
+              }
+              atRiskCounts={overlayAtRiskCounts}
+              overlayRoads={overlayAnnotated.roads.annotated as GeoJSON.FeatureCollection | null}
+              overlayCommunities={overlayAnnotated.communities.annotated as GeoJSON.FeatureCollection | null}
+              overlayInfrastructure={overlayAnnotated.infrastructure.annotated as GeoJSON.FeatureCollection | null}
+              evacZones={persistedEvacZones}
+            />
+          )}
           <OverlayPanel
             layers={overlayLayers}
             atRiskCounts={overlayAtRiskCounts}
@@ -446,7 +486,7 @@ export default function App() {
             onLayerClear={handleOverlayClear}
           />
           <EvacZonesPanel
-            zones={evacZones}
+            zones={persistedEvacZones}
             visible={evacZonesVisible}
             scales={evacZoneScales}
             onToggleVisible={setEvacZonesVisible}
@@ -503,9 +543,8 @@ export default function App() {
         <div className="top-bar-left">
           <span className="top-bar-title">Wildfire Tactical Navigator</span>
           <nav className="top-bar-nav">
-            <span className="nav-link active">Dashboard</span>
-            <span className="nav-link">Map View</span>
-            <span className="nav-link">Data Export</span>
+            <button className={`nav-link${activeTab === "simulation" ? " active" : ""}`} onClick={() => setActiveTab("simulation")}>Simulation</button>
+            <button className={`nav-link${activeTab === "eoc" ? " active" : ""}`} onClick={() => setActiveTab("eoc")}>EOC Console</button>
           </nav>
         </div>
         <div className="top-bar-right">
@@ -551,8 +590,36 @@ export default function App() {
         </div>
       </header>
 
+      {/* ── EOC Console tab (replaces map area + bottom bar) ─────── */}
+      {activeTab === "eoc" && (
+        <div className="eoc-tab-wrapper">
+          <EOCConsole
+            frames={frames}
+            currentFrameIndex={currentFrameIndex}
+            burnProbabilityData={burnProbabilityData}
+            showBurnProbView={showBurnProbView}
+            runParams={lastRunParams}
+            ignitionPoint={ignitionPoint}
+            fuelTypeLabel={lastRunParams?.fuel_type ? `${lastRunParams.fuel_type} — ${FUEL_TYPES[lastRunParams.fuel_type] ?? ""}` : undefined}
+            overlayRoads={overlayAnnotated.roads.annotated as GeoJSON.FeatureCollection | null}
+            overlayRoadsVisible={overlayLayers.roads.visible}
+            overlayCommunities={overlayAnnotated.communities.annotated as GeoJSON.FeatureCollection | null}
+            overlayCommunitiesVisible={overlayLayers.communities.visible}
+            overlayInfrastructure={overlayAnnotated.infrastructure.annotated as GeoJSON.FeatureCollection | null}
+            overlayInfrastructureVisible={overlayLayers.infrastructure.visible}
+            atRiskCounts={overlayAtRiskCounts}
+            evacZones={persistedEvacZones}
+            evacZonesVisible={evacZonesVisible}
+            isochrones={isochrones}
+            isochronesVisible={isochronesVisible}
+            fuelGridImage={fuelGridImage}
+            fuelGridVisible={fuelGridVisible}
+          />
+        </div>
+      )}
+
       {/* ── Map area — full canvas between topbar and bottombar ─── */}
-      <main className="map-area">
+      {activeTab === "simulation" && <main className="map-area">
         {/* Telemetry strip — floating glass chips over the map */}
         {lastRunParams && (
           <div className="telemetry-strip">
@@ -590,23 +657,25 @@ export default function App() {
             overlayCommunitiesVisible={overlayLayers.communities.visible}
             overlayInfrastructure={overlayAnnotated.infrastructure.annotated as GeoJSON.FeatureCollection | null}
             overlayInfrastructureVisible={overlayLayers.infrastructure.visible}
-            evacZones={evacZones}
+            evacZones={persistedEvacZones}
             evacZonesVisible={evacZonesVisible}
             isochrones={isochrones}
             isochronesVisible={isochronesVisible}
             fuelGridImage={fuelGridImage}
             fuelGridVisible={fuelGridVisible}
           />
-      </main>
+      </main>}
 
-      {/* ── Fixed bottom timeline bar ───────────────────────── */}
-      <div className="bottom-bar">
-        <TimeSlider
-          frames={frames}
-          currentIndex={currentFrameIndex}
-          onIndexChange={setFrameIndex}
-        />
-      </div>
+      {/* ── Fixed bottom timeline bar (hidden in EOC tab) ────── */}
+      {activeTab === "simulation" && (
+        <div className="bottom-bar">
+          <TimeSlider
+            frames={frames}
+            currentIndex={currentFrameIndex}
+            onIndexChange={setFrameIndex}
+          />
+        </div>
+      )}
 
       {error && (
         <div className="error-toast">

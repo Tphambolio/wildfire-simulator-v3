@@ -1,0 +1,438 @@
+/**
+ * EOC Command Console — full-viewport tabbed incident management page.
+ *
+ * Layout:
+ *   Left 45%  : read-only MapLibre map (same simulation state, no click-to-ignite)
+ *   Right 55% : sub-tabbed content — Situation / ICS Forms / Map (full-width)
+ *
+ * Sub-tabs:
+ *   Situation  → existing EOCSummary component (conditions, metrics, advisories, exports)
+ *   ICS Forms  → ICS-201, 202, 203, 204, 205, 206, 209, Full IAP — rendered in iframe
+ *   Map        → full-width map (hides data panel)
+ *
+ * Map snapshot: captured from MapLibre canvas (preserveDrawingBuffer: true) before
+ * any print or ICS form render — embedded as base64 PNG in form HTML.
+ *
+ * Design: Stitch EOC Tactical Dark system — indigo-ember palette, no-line rule,
+ * tonal layering. Reference: /tmp/stitch_export/stitch/stitch/eoc_tactical_dark/DESIGN.md
+ */
+
+import { useState, useRef, useCallback } from "react";
+import maplibregl from "maplibre-gl";
+import MapView from "./MapView";
+import EOCSummary from "./EOCSummary";
+import type { SimulationFrame, BurnProbabilityResponse } from "../types/simulation";
+import type { RunParams } from "./WeatherPanel";
+import type { EvacZone } from "../utils/evacZones";
+import type { Isochrone } from "../utils/isochrones";
+import {
+  buildICS201HTML,
+  buildICS202HTML,
+  buildICS203HTML,
+  buildICS204HTML,
+  buildICS205HTML,
+  buildICS206HTML,
+  buildICS214HTML,
+  buildFullIAPHTML,
+} from "../utils/icsForms";
+import { openICS209Report } from "../utils/ics209";
+import type { SuppressionAdvisory } from "./EOCSummary";
+import { buildSuppressionAdvisory } from "./EOCSummary";
+
+// ── Props ─────────────────────────────────────────────────────────────────────
+
+interface EOCConsoleProps {
+  // Simulation data
+  frames: SimulationFrame[];
+  currentFrameIndex: number;
+  burnProbabilityData?: BurnProbabilityResponse | null;
+  showBurnProbView?: boolean;
+  // Run context
+  runParams: RunParams | null;
+  ignitionPoint: { lat: number; lng: number } | null;
+  fuelTypeLabel?: string;
+  // Overlays
+  overlayRoads?: GeoJSON.FeatureCollection | null;
+  overlayRoadsVisible?: boolean;
+  overlayCommunities?: GeoJSON.FeatureCollection | null;
+  overlayCommunitiesVisible?: boolean;
+  overlayInfrastructure?: GeoJSON.FeatureCollection | null;
+  overlayInfrastructureVisible?: boolean;
+  atRiskCounts?: { roads: number; communities: number; infrastructure: number };
+  // Evac zones
+  evacZones?: EvacZone[];
+  evacZonesVisible?: boolean;
+  // Isochrones
+  isochrones?: Isochrone[];
+  isochronesVisible?: boolean;
+  // Fuel grid
+  fuelGridImage?: { image: string; bounds: [number, number, number, number] } | null;
+  fuelGridVisible?: boolean;
+}
+
+type ConsoleTab = "situation" | "ics-forms" | "map";
+
+type ICSFormId =
+  | "ics201" | "ics202" | "ics203" | "ics204" | "ics205" | "ics206"
+  | "ics209" | "ics214" | "full-iap";
+
+const ICS_FORM_LABELS: Record<ICSFormId, string> = {
+  ics201: "ICS-201 Briefing",
+  ics202: "ICS-202 Objectives",
+  ics203: "ICS-203 Organization",
+  ics204: "ICS-204 Assignments",
+  ics205: "ICS-205 Comms Plan",
+  ics206: "ICS-206 Medical Plan",
+  ics209: "ICS-209 Status Summary",
+  ics214: "ICS-214 Activity Log",
+  "full-iap": "Full IAP Package",
+};
+
+export default function EOCConsole({
+  frames,
+  currentFrameIndex,
+  burnProbabilityData = null,
+  showBurnProbView = false,
+  runParams,
+  ignitionPoint,
+  fuelTypeLabel,
+  overlayRoads = null,
+  overlayRoadsVisible = true,
+  overlayCommunities = null,
+  overlayCommunitiesVisible = true,
+  overlayInfrastructure = null,
+  overlayInfrastructureVisible = true,
+  atRiskCounts,
+  evacZones = [],
+  evacZonesVisible = true,
+  isochrones = [],
+  isochronesVisible = false,
+  fuelGridImage = null,
+  fuelGridVisible = true,
+}: EOCConsoleProps) {
+  const [consoleTab, setConsoleTab] = useState<ConsoleTab>("situation");
+  const [incidentName, setIncidentName] = useState("Untitled Incident");
+  const [editingName, setEditingName] = useState(false);
+  const [selectedForm, setSelectedForm] = useState<ICSFormId>("ics201");
+  const [formHtml, setFormHtml] = useState<string>("");
+  const [mapSnapshot, setMapSnapshot] = useState<string | undefined>(undefined);
+  const consoleMapRef = useRef<maplibregl.Map | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const handleMapRefCallback = useCallback((m: maplibregl.Map) => {
+    consoleMapRef.current = m;
+  }, []);
+
+  // ── Map snapshot capture ──────────────────────────────────────────────────
+
+  const captureMapSnapshot = useCallback((): string | undefined => {
+    const canvas = consoleMapRef.current?.getCanvas();
+    if (!canvas) return undefined;
+    try {
+      const dataUrl = canvas.toDataURL("image/png");
+      setMapSnapshot(dataUrl);
+      return dataUrl;
+    } catch {
+      return undefined;
+    }
+  }, []);
+
+  // ── Build ICS form options ────────────────────────────────────────────────
+
+  const buildFormOptions = useCallback((snapshot?: string) => ({
+    incidentName,
+    frames,
+    runParams,
+    ignitionPoint,
+    fuelTypeLabel,
+    atRiskCounts,
+    evacZones,
+    mapSnapshotDataUrl: snapshot ?? mapSnapshot,
+  }), [incidentName, frames, runParams, ignitionPoint, fuelTypeLabel, atRiskCounts, evacZones, mapSnapshot]);
+
+  // ── Suppression advisory for ICS-209 ─────────────────────────────────────
+
+  const getSuppressionAdvisory = useCallback((): SuppressionAdvisory | null => {
+    if (frames.length === 0) return null;
+    const final = frames[frames.length - 1];
+    const perimeterLengthKm = (perim: number[][]): number => {
+      let t = 0;
+      for (let i = 0; i < perim.length; i++) {
+        const a = perim[i], b = perim[(i + 1) % perim.length];
+        const dLat = ((b[0] - a[0]) * Math.PI) / 180;
+        const dLng = ((b[1] - a[1]) * Math.PI) / 180;
+        const x = Math.sin(dLat / 2) ** 2 +
+          Math.cos((a[0] * Math.PI) / 180) * Math.cos((b[0] * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+        t += 6371 * 2 * Math.asin(Math.sqrt(x));
+      }
+      return t;
+    };
+    let peakRos = 0, peakHfi = 0, maxSpotDist = 0, spotCount = 0;
+    for (const f of frames) {
+      if (f.head_ros_m_min > peakRos) peakRos = f.head_ros_m_min;
+      if (f.max_hfi_kw_m > peakHfi) peakHfi = f.max_hfi_kw_m;
+      for (const s of f.spot_fires ?? []) {
+        if (s.distance_m > maxSpotDist) maxSpotDist = s.distance_m;
+        spotCount++;
+      }
+    }
+    return buildSuppressionAdvisory({
+      peakRosMMmin: peakRos,
+      peakHfiKwM: peakHfi,
+      finalAreaHa: final.area_ha,
+      perimeterKm: perimeterLengthKm(final.perimeter ?? []),
+      maxSpotDistM: maxSpotDist,
+      spotCount,
+      fireType: final.fire_type,
+      flameLengthM: final.flame_length_m,
+    });
+  }, [frames]);
+
+  // ── Form rendering ────────────────────────────────────────────────────────
+
+  const renderForm = useCallback((formId: ICSFormId, snapshot?: string) => {
+    const opts = buildFormOptions(snapshot);
+    if (formId === "ics209") {
+      openICS209Report({ frames, burnProbData: burnProbabilityData, runParams, ignitionPoint, fuelTypeLabel, atRiskCounts, evacZones, suppAdvisory: getSuppressionAdvisory() });
+      return; // ICS-209 opens in new window, not iframe
+    }
+    let html = "";
+    if (formId === "ics201") html = buildICS201HTML(opts);
+    else if (formId === "ics202") html = buildICS202HTML(opts);
+    else if (formId === "ics203") html = buildICS203HTML(opts);
+    else if (formId === "ics204") html = buildICS204HTML(opts);
+    else if (formId === "ics205") html = buildICS205HTML(opts);
+    else if (formId === "ics206") html = buildICS206HTML(opts);
+    else if (formId === "ics214") html = buildICS214HTML(opts);
+    else if (formId === "full-iap") html = buildFullIAPHTML(opts);
+    setFormHtml(html);
+    setSelectedForm(formId);
+  }, [buildFormOptions, frames, burnProbabilityData, runParams, ignitionPoint, fuelTypeLabel, atRiskCounts, overlayRoads, overlayCommunities, overlayInfrastructure, evacZones, getSuppressionAdvisory]);
+
+  const handleFormSelect = useCallback((formId: ICSFormId) => {
+    const snap = captureMapSnapshot();
+    if (formId === "ics209") {
+      renderForm(formId, snap);
+      return;
+    }
+    setConsoleTab("ics-forms");
+    renderForm(formId, snap);
+  }, [captureMapSnapshot, renderForm]);
+
+  const handlePrintForm = useCallback(() => {
+    iframeRef.current?.contentWindow?.print();
+  }, []);
+
+  const handleOpenInNewWindow = useCallback(() => {
+    if (!formHtml) return;
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(formHtml); w.document.close(); w.print(); }
+  }, [formHtml]);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  const isMapFullWidth = consoleTab === "map";
+
+  return (
+    <div className="eoc-console">
+      {/* ── Console header ─────────────────────────────────────────── */}
+      <div className="eoc-console-header">
+        <div className="eoc-header-left">
+          {editingName ? (
+            <input
+              className="eoc-incident-name-input"
+              value={incidentName}
+              autoFocus
+              onChange={(e) => setIncidentName(e.target.value)}
+              onBlur={() => setEditingName(false)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setEditingName(false); }}
+            />
+          ) : (
+            <button className="eoc-incident-name-btn" onClick={() => setEditingName(true)} title="Click to edit incident name">
+              {incidentName}
+              <span className="eoc-edit-icon">✎</span>
+            </button>
+          )}
+          {frames.length > 0 && <span className="eoc-status-badge">● ACTIVE</span>}
+        </div>
+        <div className="eoc-header-right">
+          <button className="eoc-action-btn" onClick={() => { captureMapSnapshot(); setConsoleTab("situation"); }} title="Print EOC Console">
+            🖨 Print
+          </button>
+          <button className="eoc-action-btn" onClick={() => handleFormSelect("ics209")} title="Open ICS-209">
+            ICS-209
+          </button>
+          <button className="eoc-action-btn" onClick={() => handleFormSelect("full-iap")} title="Generate Full IAP Package">
+            Full IAP
+          </button>
+        </div>
+      </div>
+
+      {/* ── Sub-tabs ───────────────────────────────────────────────── */}
+      <div className="eoc-subtabs">
+        {(["situation", "ics-forms", "map"] as ConsoleTab[]).map((tab) => (
+          <button
+            key={tab}
+            className={`eoc-subtab${consoleTab === tab ? " active" : ""}`}
+            onClick={() => setConsoleTab(tab)}
+          >
+            {tab === "situation" ? "Situation" : tab === "ics-forms" ? "ICS Forms" : "Map"}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Main body ─────────────────────────────────────────────── */}
+      <div className={`eoc-body${isMapFullWidth ? " eoc-body--map-full" : ""}`}>
+
+        {/* Left: read-only map */}
+        <div className={`eoc-map-panel${isMapFullWidth ? " eoc-map-panel--full" : ""}`}>
+          <MapView
+            frames={frames}
+            currentFrameIndex={currentFrameIndex}
+            onMapClick={() => {}}
+            ignitionPoint={ignitionPoint}
+            burnProbabilityData={burnProbabilityData}
+            showBurnProbView={showBurnProbView}
+            overlayRoads={overlayRoads}
+            overlayRoadsVisible={overlayRoadsVisible}
+            overlayCommunities={overlayCommunities}
+            overlayCommunitiesVisible={overlayCommunitiesVisible}
+            overlayInfrastructure={overlayInfrastructure}
+            overlayInfrastructureVisible={overlayInfrastructureVisible}
+            evacZones={evacZones}
+            evacZonesVisible={evacZonesVisible}
+            isochrones={isochrones}
+            isochronesVisible={isochronesVisible}
+            fuelGridImage={fuelGridImage}
+            fuelGridVisible={fuelGridVisible}
+            readOnly
+            mapRefCallback={handleMapRefCallback}
+          />
+          {/* Print-only map snapshot */}
+          {mapSnapshot && (
+            <img className="eoc-print-map" src={mapSnapshot} alt="Map snapshot" />
+          )}
+        </div>
+
+        {/* Right: content panel (hidden in full-map mode) */}
+        {!isMapFullWidth && (
+          <div className="eoc-data-panels">
+
+            {/* ── Situation tab ───────────────────────────── */}
+            {consoleTab === "situation" && (
+              <EOCSummary
+                frames={frames}
+                burnProbData={burnProbabilityData}
+                runParams={runParams}
+                ignitionPoint={ignitionPoint}
+                fuelTypeLabel={fuelTypeLabel}
+                atRiskCounts={atRiskCounts}
+                overlayRoads={overlayRoads}
+                overlayCommunities={overlayCommunities}
+                overlayInfrastructure={overlayInfrastructure}
+                evacZones={evacZones}
+              />
+            )}
+
+            {/* ── ICS Forms tab ───────────────────────────── */}
+            {consoleTab === "ics-forms" && (
+              <div className="eoc-forms-panel">
+                <div className="eoc-forms-header">
+                  <span className="eoc-forms-title">ICS FORMS</span>
+                  <span className="eoc-forms-subtitle">NIMS Incident Action Plan</span>
+                </div>
+
+                {/* Initial forms */}
+                <div className="eoc-form-group">
+                  <span className="eoc-form-group-label">Initial Briefing</span>
+                  <div className="eoc-form-btns">
+                    {(["ics201"] as ICSFormId[]).map((id) => (
+                      <button
+                        key={id}
+                        className={`eoc-form-btn${selectedForm === id ? " active" : ""}`}
+                        onClick={() => handleFormSelect(id)}
+                      >
+                        {ICS_FORM_LABELS[id]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* IAP package */}
+                <div className="eoc-form-group">
+                  <span className="eoc-form-group-label">IAP Package</span>
+                  <div className="eoc-form-btns">
+                    {(["ics202", "ics203", "ics204", "ics205", "ics206"] as ICSFormId[]).map((id) => (
+                      <button
+                        key={id}
+                        className={`eoc-form-btn${selectedForm === id ? " active" : ""}`}
+                        onClick={() => handleFormSelect(id)}
+                      >
+                        {ICS_FORM_LABELS[id]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Status & logs */}
+                <div className="eoc-form-group">
+                  <span className="eoc-form-group-label">Status & Logs</span>
+                  <div className="eoc-form-btns">
+                    {(["ics209", "ics214"] as ICSFormId[]).map((id) => (
+                      <button
+                        key={id}
+                        className={`eoc-form-btn${selectedForm === id ? " active" : ""}`}
+                        onClick={() => handleFormSelect(id)}
+                      >
+                        {ICS_FORM_LABELS[id]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Full IAP */}
+                <div className="eoc-form-group">
+                  <div className="eoc-form-btns">
+                    <button
+                      className={`eoc-form-btn eoc-form-btn--primary${selectedForm === "full-iap" ? " active" : ""}`}
+                      onClick={() => handleFormSelect("full-iap")}
+                    >
+                      ⬇ Generate Full IAP (201–206)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Form viewer */}
+                {formHtml && (
+                  <div className="eoc-form-viewer">
+                    <div className="eoc-form-viewer-toolbar">
+                      <span className="eoc-form-viewer-name">{ICS_FORM_LABELS[selectedForm]}</span>
+                      <div className="eoc-form-viewer-actions">
+                        <button className="eoc-action-btn" onClick={handlePrintForm}>🖨 Print</button>
+                        <button className="eoc-action-btn" onClick={handleOpenInNewWindow}>↗ New Window</button>
+                      </div>
+                    </div>
+                    <iframe
+                      ref={iframeRef}
+                      srcDoc={formHtml}
+                      className="eoc-form-iframe"
+                      title={ICS_FORM_LABELS[selectedForm]}
+                      sandbox="allow-same-origin allow-scripts allow-modals"
+                    />
+                  </div>
+                )}
+
+                {!formHtml && (
+                  <div className="eoc-forms-empty">
+                    Select a form above to generate and preview it.<br />
+                    The current map state will be captured as a snapshot for embedded maps.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

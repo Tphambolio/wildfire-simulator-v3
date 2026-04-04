@@ -17,42 +17,6 @@ import { isochronesToGeoJSON, isochroneLabelsGeoJSON } from "../utils/isochrones
 /** Minimum spot fire HFI (kW/m) to render on the map. Weak spots below this are hidden. */
 const SPOT_HFI_MIN = 300;
 
-/**
- * Build a curved parabolic arc between two [lng, lat] points.
- * Uses a quadratic bezier with a perpendicular control point offset so arcs
- * bow naturally rather than drawing straight-line trajectories.
- */
-function arcCoords(
-  src: [number, number],
-  dst: [number, number],
-  steps = 10,
-): [number, number][] {
-  const dx = dst[0] - src[0];
-  const dy = dst[1] - src[1];
-  const len = Math.sqrt(dx * dx + dy * dy);
-  if (len === 0) return [src, dst];
-
-  // Perpendicular unit vector (left of travel direction)
-  const px = -dy / len;
-  const py = dx / len;
-  const arcH = len * 0.32;
-
-  // Quadratic bezier control point
-  const cpX = (src[0] + dst[0]) / 2 + px * arcH;
-  const cpY = (src[1] + dst[1]) / 2 + py * arcH;
-
-  const coords: [number, number][] = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const mt = 1 - t;
-    coords.push([
-      mt * mt * src[0] + 2 * mt * t * cpX + t * t * dst[0],
-      mt * mt * src[1] + 2 * mt * t * cpY + t * t * dst[1],
-    ]);
-  }
-  return coords;
-}
-
 /** A simple non-modal toast — disappears after 3 s */
 function MapToast({ message, onDone }: { message: string; onDone: () => void }) {
   useEffect(() => {
@@ -220,6 +184,10 @@ interface MapViewProps {
   /** Fuel grid raster overlay — base64 PNG + WGS84 bounds */
   fuelGridImage?: { image: string; bounds: [number, number, number, number] } | null;
   fuelGridVisible?: boolean;
+  /** When true: disables click-to-ignite and hides the map controls panel */
+  readOnly?: boolean;
+  /** Called with the maplibregl.Map instance once the map has loaded */
+  mapRefCallback?: (m: maplibregl.Map) => void;
 }
 
 export default function MapView({
@@ -242,12 +210,15 @@ export default function MapView({
   isochronesVisible = false,
   fuelGridImage = null,
   fuelGridVisible = true,
+  readOnly = false,
+  mapRefCallback,
 }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markerRef = useRef<maplibregl.Marker | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [basemap, setBasemap] = useState<BasemapId>("osm");
+  const readOnlyRef = useRef(readOnly);
   // Ignition placement mode — true while operator is picking a start point
   const [ignitionMode, setIgnitionMode] = useState(!ignitionPoint);
   const ignitionModeRef = useRef(!ignitionPoint);
@@ -788,6 +759,8 @@ export default function MapView({
       style: BASEMAPS.osm.style(),
       center: [-113.49, 53.55],
       zoom: 11,
+      // @ts-expect-error: preserveDrawingBuffer is a valid WebGL option not yet in MapLibre v5 type definitions
+      preserveDrawingBuffer: true,
     });
 
     m.addControl(new maplibregl.NavigationControl(), "top-right");
@@ -796,10 +769,11 @@ export default function MapView({
       addFireLayers(m);
       m.resize();
       setMapReady(true);
+      mapRefCallback?.(m);
     });
 
     m.on("click", (e) => {
-      if (!ignitionModeRef.current) return;
+      if (readOnlyRef.current || !ignitionModeRef.current) return;
       onMapClick(e.lngLat.lat, e.lngLat.lng);
       // Exit placement mode after setting ignition
       ignitionModeRef.current = false;
@@ -1328,8 +1302,8 @@ export default function MapView({
           </div>
         </div>
       )}
-      {/* ── Map controls panel — bottom-right glass panel ───── */}
-      <div className="map-controls-panel">
+      {/* ── Map controls panel — bottom-right glass panel (hidden in readOnly mode) ───── */}
+      {!readOnly && <div className="map-controls-panel">
         {/* Basemap row */}
         <div className="mcp-basemap-row">
           {(Object.keys(BASEMAPS) as BasemapId[]).map((id) => (
@@ -1381,10 +1355,10 @@ export default function MapView({
           <span className="mcp-label">Spot Fires</span>
           <span className={`mcp-toggle-dot${showSpotFires ? " on" : ""}`} />
         </button>
-      </div>
+      </div>}
 
-      {/* Placement mode hint overlay */}
-      {ignitionMode && (
+      {/* Placement mode hint overlay (hidden in readOnly mode) */}
+      {!readOnly && ignitionMode && (
         <div className="mcp-placement-hint">
           Click map to set ignition point
         </div>

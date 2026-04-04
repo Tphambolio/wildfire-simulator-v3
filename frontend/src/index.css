@@ -2264,3 +2264,374 @@ select {
   opacity: 0.5;
   font-family: 'Inter', monospace;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EOC COMMAND CONSOLE
+   Full-viewport tabbed interface — Stitch EOC Tactical Dark design system
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Wrapper occupies the space where map-area + bottom-bar normally live */
+.eoc-tab-wrapper {
+  position: fixed;
+  top: var(--topbar-height);
+  left: var(--sidebar-width);
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  z-index: 5;
+}
+
+/* Console header — 48px strip with incident name + action buttons */
+.eoc-console {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.eoc-console-header {
+  height: 48px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: rgba(26, 26, 46, 0.95);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-dim);
+  gap: 16px;
+}
+
+.eoc-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.eoc-incident-name-btn {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: var(--radius);
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.eoc-incident-name-btn:hover {
+  background: var(--surface-highest);
+}
+
+.eoc-edit-icon {
+  font-size: 11px;
+  opacity: 0.5;
+}
+
+.eoc-incident-name-input {
+  background: var(--surface-highest);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  padding: 2px 8px;
+  outline: none;
+  min-width: 220px;
+}
+
+.eoc-status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #4caf50;
+  background: rgba(76, 175, 80, 0.1);
+  border: 1px solid rgba(76, 175, 80, 0.25);
+  border-radius: 10px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.eoc-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.eoc-action-btn {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+  background: var(--surface-highest);
+  border: none;
+  border-radius: var(--radius);
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.eoc-action-btn:hover {
+  background: var(--surface-high);
+  color: var(--primary);
+}
+
+/* Sub-tabs */
+.eoc-subtabs {
+  display: flex;
+  gap: 0;
+  background: var(--surface-low);
+  border-bottom: 1px solid var(--border-dim);
+  flex-shrink: 0;
+  padding: 0 20px;
+}
+
+.eoc-subtab {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+  opacity: 0.5;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: opacity 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.eoc-subtab:hover {
+  opacity: 0.85;
+}
+
+.eoc-subtab.active {
+  color: var(--accent);
+  opacity: 1;
+  border-bottom-color: var(--accent);
+}
+
+/* Body — two-column split */
+.eoc-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.eoc-body--map-full .eoc-map-panel {
+  width: 100%;
+}
+
+/* Left panel: read-only map */
+.eoc-map-panel {
+  width: 45%;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.eoc-map-panel--full {
+  width: 100%;
+}
+
+/* Right panel: scrollable data area */
+.eoc-data-panels {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--surface-low);
+  border-left: 1px solid var(--border-dim);
+  min-width: 0;
+}
+
+.eoc-data-panels .panel {
+  margin: 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+/* Print-only map snapshot (hidden on screen) */
+.eoc-print-map {
+  display: none;
+}
+
+/* ── ICS Forms panel ───────────────────────────────────────── */
+
+.eoc-forms-panel {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.eoc-forms-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.eoc-forms-title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+}
+
+.eoc-forms-subtitle {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.eoc-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.eoc-form-group-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.eoc-form-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.eoc-form-btn {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+  background: var(--surface-highest);
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.eoc-form-btn:hover {
+  background: var(--surface-high);
+  border-left-color: var(--accent);
+}
+
+.eoc-form-btn.active {
+  background: var(--surface-high);
+  border-left-color: var(--accent);
+  color: var(--primary);
+}
+
+.eoc-form-btn--primary {
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: #5f1900;
+  border-left-color: transparent;
+  font-weight: 800;
+  width: 100%;
+  justify-content: center;
+}
+
+.eoc-form-btn--primary:hover {
+  filter: brightness(1.08);
+  border-left-color: transparent;
+}
+
+/* Form viewer (iframe) */
+.eoc-form-viewer {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  min-height: 500px;
+  flex: 1;
+}
+
+.eoc-form-viewer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--surface-highest);
+  border-bottom: 1px solid var(--border-dim);
+  gap: 8px;
+}
+
+.eoc-form-viewer-name {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.eoc-form-viewer-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.eoc-form-iframe {
+  flex: 1;
+  width: 100%;
+  min-height: 480px;
+  border: none;
+  background: #ffffff;
+}
+
+.eoc-forms-empty {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  opacity: 0.6;
+  line-height: 1.8;
+}
+
+/* ── Print media ───────────────────────────────────────────── */
+
+@media print {
+  .sidebar,
+  .top-bar,
+  .bottom-bar,
+  .eoc-console-header,
+  .eoc-subtabs,
+  .eoc-forms-panel,
+  .eoc-map-panel,
+  .eoc-subtab,
+  .btn-control,
+  .btn-emergency { display: none !important; }
+
+  .eoc-tab-wrapper { position: static; }
+  .eoc-body { display: block; }
+  .eoc-data-panels { width: 100%; overflow: visible; border: none; }
+  .eoc-data-panels .panel { page-break-inside: avoid; }
+  .eoc-print-map { display: block !important; width: 100%; max-width: 700px; margin-bottom: 20px; }
+}

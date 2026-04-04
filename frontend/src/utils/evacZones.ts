@@ -233,3 +233,114 @@ export function evacZonesToGeoJSON(zones: EvacZone[]): GeoJSON.FeatureCollection
   }
   return { type: "FeatureCollection", features };
 }
+
+// ── Tier ranking helper ───────────────────────────────────────────────────────
+
+const TIER_RANK: Record<EvacZoneLabel, number> = { Order: 3, Alert: 2, Watch: 1 };
+
+const ZONE_META: Record<EvacZoneLabel, { color: string; action: string; timeRangeLabel: string }> = {
+  Order: { color: "#d32f2f", action: "LEAVE NOW",          timeRangeLabel: "0–2 h"  },
+  Alert: { color: "#f57c00", action: "BE READY (~30 min)", timeRangeLabel: "2–6 h"  },
+  Watch: { color: "#f9a825", action: "MONITOR SITUATION",  timeRangeLabel: "6–12 h" },
+};
+
+/**
+ * Merge committed zone history (Order + Alert) into the current live zone output.
+ *
+ * Persistence model:
+ *   Order  — hard persist: once issued, a neighbourhood never leaves Order
+ *   Alert  — soft persist: stays at minimum Alert; can upgrade to Order
+ *   Watch  — dynamic: never persisted; reflects current 6–12 h horizon only
+ *
+ * If a historically-committed neighbourhood is absent from the current zones
+ * (e.g. the scrubber moved backward), it is re-inserted into the appropriate
+ * tier using community features from the communities layer.  If the neighbourhood
+ * is already in a higher tier, it stays there.
+ */
+export function applyZoneHistory(
+  current: EvacZone[],
+  history: Map<string, EvacZoneLabel>,
+  communities: GeoJSON.FeatureCollection | null | undefined,
+): EvacZone[] {
+  if (history.size === 0 || !communities) return current;
+
+  // Build what is currently assigned at each tier
+  const currentlyAssigned = new Map<string, EvacZoneLabel>();
+  for (const zone of current) {
+    for (const name of zone.communitiesAtRisk) {
+      const prev = currentlyAssigned.get(name);
+      if (!prev || TIER_RANK[zone.label] > TIER_RANK[prev]) {
+        currentlyAssigned.set(name, zone.label);
+      }
+    }
+  }
+
+  // Find history entries that need injection or upgrade
+  const toAdd = new Map<EvacZoneLabel, Array<{ name: string; feature: GeoJSON.Feature }>>();
+  const toRemoveFromLower = new Set<string>();
+
+  for (const [name, histTier] of history) {
+    if (histTier === "Watch") continue; // Watch is never committed
+    const curTier = currentlyAssigned.get(name);
+    if (curTier && TIER_RANK[curTier] >= TIER_RANK[histTier]) continue; // already at correct tier or higher
+
+    const feature = communities.features.find((f) => featureName(f) === name);
+    if (!feature) continue;
+
+    if (!toAdd.has(histTier)) toAdd.set(histTier, []);
+    toAdd.get(histTier)!.push({ name, feature });
+
+    // If currently in a lower tier, remove it from there (it belongs in histTier now)
+    if (curTier && TIER_RANK[curTier] < TIER_RANK[histTier]) {
+      toRemoveFromLower.add(name);
+    }
+  }
+
+  if (toAdd.size === 0) return current;
+
+  // Strip upgraded names from lower-tier zones
+  let result: EvacZone[] = current.map((zone) => {
+    if (toRemoveFromLower.size === 0) return zone;
+    const kept = zone.communitiesAtRisk.filter((n) => !toRemoveFromLower.has(n));
+    if (kept.length === zone.communitiesAtRisk.length) return zone;
+    return {
+      ...zone,
+      communitiesAtRisk: kept,
+      communitiesFeatures: zone.communitiesFeatures.filter((f) => !toRemoveFromLower.has(featureName(f))),
+    };
+  });
+
+  // Inject historical communities into existing zones (or create synthetic zones)
+  for (const [label, entries] of toAdd) {
+    const names = entries.map((e) => e.name);
+    const features = entries.map((e) => e.feature);
+    const idx = result.findIndex((z) => z.label === label);
+    if (idx >= 0) {
+      result = result.map((z, i) =>
+        i === idx
+          ? {
+              ...z,
+              communitiesAtRisk: [...z.communitiesAtRisk, ...names],
+              communitiesFeatures: [...z.communitiesFeatures, ...features],
+            }
+          : z
+      );
+    } else {
+      const meta = ZONE_META[label];
+      result.push({
+        label,
+        color: meta.color,
+        action: meta.action,
+        timeRangeLabel: meta.timeRangeLabel,
+        perimeter: [],
+        areaHa: 0,
+        communitiesAtRisk: names,
+        communitiesFeatures: features,
+        scale: 1,
+      });
+    }
+  }
+
+  // Maintain Order > Alert > Watch sort order
+  return result.sort((a, b) => TIER_RANK[b.label] - TIER_RANK[a.label]);
+}
