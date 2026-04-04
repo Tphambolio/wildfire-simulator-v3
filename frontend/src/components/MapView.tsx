@@ -188,6 +188,8 @@ interface MapViewProps {
   readOnly?: boolean;
   /** Called with the maplibregl.Map instance once the map has loaded */
   mapRefCallback?: (m: maplibregl.Map) => void;
+  /** External control for spot fire layer visibility (used by EOC console) */
+  spotFiresVisible?: boolean;
 }
 
 export default function MapView({
@@ -212,6 +214,7 @@ export default function MapView({
   fuelGridVisible = true,
   readOnly = false,
   mapRefCallback,
+  spotFiresVisible: spotFiresVisibleProp,
 }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -1077,11 +1080,12 @@ export default function MapView({
   // Toggle spot fire layer visibility
   useEffect(() => {
     if (!map.current || !mapReady) return;
-    const visibility = showSpotFires ? "visible" : "none";
+    // Prop overrides internal toggle (used by EOC console read-only map)
+    const visibility = (spotFiresVisibleProp ?? showSpotFires) ? "visible" : "none";
     for (const id of ["spot-fires-circle", "spot-fires-pulse", "spot-fires-heatmap", "ember-source-dots"]) {
       if (map.current.getLayer(id)) map.current.setLayoutProperty(id, "visibility", visibility);
     }
-  }, [showSpotFires, mapReady]);
+  }, [showSpotFires, spotFiresVisibleProp, mapReady]);
 
   // Toggle between burn probability view and fire spread view
   useEffect(() => {

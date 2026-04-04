@@ -119,6 +119,9 @@ export default function EOCConsole({
   const consoleMapRef = useRef<maplibregl.Map | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
+  // ── Layer visibility ─────────────────────────────────────────────────────
+  const [spotFiresVisible, setSpotFiresVisible] = useState(true);
+
   // ── Map markup state ─────────────────────────────────────────────────────
   type MarkupTool = "pen" | "text" | null;
   const [markupTool, setMarkupTool] = useState<MarkupTool>(null);
@@ -374,6 +377,7 @@ export default function EOCConsole({
             fuelGridVisible={fuelGridVisible}
             readOnly
             mapRefCallback={handleMapRefCallback}
+            spotFiresVisible={spotFiresVisible}
           />
 
           {/* SVG markup overlay */}
@@ -416,6 +420,12 @@ export default function EOCConsole({
               onClick={() => consoleMapRef.current?.zoomOut()}
               title="Zoom out"
             >−</button>
+            <div className="eoc-markup-divider" />
+            <button
+              className={`eoc-markup-tool${spotFiresVisible ? " active" : ""}`}
+              onClick={() => setSpotFiresVisible(v => !v)}
+              title={spotFiresVisible ? "Spot fires ON — click to hide" : "Spot fires OFF — click to show"}
+            >✦</button>
             <div className="eoc-markup-divider" />
             <span className="eoc-markup-label">MARK</span>
             <button
