@@ -618,8 +618,8 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Map area — full canvas between topbar and bottombar ─── */}
-      {activeTab === "simulation" && <main className="map-area">
+      {/* ── Map area — always mounted so MapLibre doesn't reinitialize on tab switch ─── */}
+      <main className="map-area" style={activeTab === "eoc" ? { display: "none" } : {}}>
         {/* Telemetry strip — floating glass chips over the map */}
         {lastRunParams && (
           <div className="telemetry-strip">
@@ -664,7 +664,7 @@ export default function App() {
             fuelGridImage={fuelGridImage}
             fuelGridVisible={fuelGridVisible}
           />
-      </main>}
+      </main>
 
       {/* ── Fixed bottom timeline bar (hidden in EOC tab) ────── */}
       {activeTab === "simulation" && (
