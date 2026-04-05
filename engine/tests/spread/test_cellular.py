@@ -169,12 +169,13 @@ class TestEllipticalSpreadProb:
     """
 
     def test_head_direction_highest_probability(self):
-        """Head and back fire directions have higher probability than flanks.
+        """Head fire probability > flank > back (FBP directional spread).
 
-        The elliptical polar equation used here is centered on the ellipse
-        center (not the focus), so the head and back axes both equal the
-        semi-major axis `a = ros`. The flanks are constrained to `b = ros/lbr`,
-        giving lower probability perpendicular to the wind.
+        Geometric interpolation gives exactly the three FBP reference ROS values:
+          θ=0°  → head_ros            (maximum)
+          θ=90° → flank_ros = head/LBR (intermediate)
+          θ=180°→ back_ros  = head/LBR² (minimum)
+        All three are strictly decreasing with angle from head direction.
         """
         spread_dir = 90.0  # fire spreads east
         ros = 5.0
@@ -186,9 +187,8 @@ class TestEllipticalSpreadProb:
         flank_prob = _elliptical_spread_prob(0.0, spread_dir, ros, lbr, cell_size, dt)
         back_prob = _elliptical_spread_prob(270.0, spread_dir, ros, lbr, cell_size, dt)
 
-        # Both head and back use the semi-major axis in the polar formula
-        assert head_prob > flank_prob
-        assert back_prob > flank_prob
+        assert head_prob > flank_prob   # head fastest
+        assert flank_prob > back_prob   # back slowest (back_ros = head_ros/LBR²)
 
     def test_probability_bounded_zero_to_one(self):
         """Spread probability must be in [0, 1]."""
@@ -227,15 +227,39 @@ class TestEllipticalSpreadProb:
         )
         assert prob == pytest.approx(0.0)
 
-    def test_higher_lbr_increases_head_probability(self):
-        """Higher LBR (stronger wind) should increase head direction probability."""
-        prob_low_lbr = _elliptical_spread_prob(
-            90.0, 90.0, ros=5.0, lbr=1.5, cell_size=100.0, dt=5.0
+    def test_higher_lbr_decreases_back_probability(self):
+        """Higher LBR (stronger wind) should decrease back-fire direction probability.
+
+        With the geometric interpolation:
+          - Head direction (θ=0°) always gets dir_ros = head_ros, regardless of LBR.
+            LBR does NOT change head probability when head_ros is held constant.
+          - Back direction (θ=180°) gets back_ros = head_ros / LBR², so higher LBR
+            means lower back_ros and lower back spread probability.
+          - Flank direction (θ=90°) gets flank_ros = head_ros / LBR, so higher LBR
+            also reduces flank probability (correctly).
+        """
+        spread_dir = 90.0  # fire spreads east; back is west (270°)
+        ros = 5.0
+        cell_size = 100.0
+        dt = 5.0
+
+        # Back probability should decrease with higher LBR
+        back_prob_low_lbr = _elliptical_spread_prob(
+            270.0, spread_dir, ros=ros, lbr=1.5, cell_size=cell_size, dt=dt
         )
-        prob_high_lbr = _elliptical_spread_prob(
-            90.0, 90.0, ros=5.0, lbr=5.0, cell_size=100.0, dt=5.0
+        back_prob_high_lbr = _elliptical_spread_prob(
+            270.0, spread_dir, ros=ros, lbr=5.0, cell_size=cell_size, dt=dt
         )
-        assert prob_high_lbr >= prob_low_lbr
+        assert back_prob_high_lbr < back_prob_low_lbr
+
+        # Head probability is the same for both LBR values (head_ros unchanged)
+        head_prob_low_lbr = _elliptical_spread_prob(
+            90.0, spread_dir, ros=ros, lbr=1.5, cell_size=cell_size, dt=dt
+        )
+        head_prob_high_lbr = _elliptical_spread_prob(
+            90.0, spread_dir, ros=ros, lbr=5.0, cell_size=cell_size, dt=dt
+        )
+        assert head_prob_low_lbr == pytest.approx(head_prob_high_lbr)
 
 
 # ---------------------------------------------------------------------------

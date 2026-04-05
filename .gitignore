@@ -30,12 +30,15 @@ api/.env
 engine/.env
 *.log
 
-# Data files (large)
+# Data files (large spatial assets — bundled into Docker image, not committed to git)
+data/
 *.tif
 *.tiff
 *.geotiff
 *.gpkg
 *.gdb/
+*.geojson
+*.geojson.gz
 
 # OS
 .DS_Store

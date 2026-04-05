@@ -136,28 +136,37 @@ class TestAggregation:
     def test_probability_one_from_100pct_iterations(self, small_grid, moderate_conditions):
         """Cell that burns in every iteration must have P = 1.0.
 
-        Use n=1 with no jitter and a fixed seed so the same cell burns
-        every time (n_iterations doesn't affect this with n=1, but we
-        use n=3 with seed that produces identical ignition cells).
+        Use n=1: any cell in the single run's burned_cells has burn_count=1
+        and iterations_completed=1, so burn_probability = 1.0 exactly.
+        This directly tests the aggregation formula without depending on
+        stochastic spread dynamics (CA uses random.random() per step, so
+        multiple iterations with different seeds can produce different outcomes
+        even under identical weather conditions).
         """
-        # 3 iterations, no jitter — ignition cell is the same every time
         cfg = MonteCarloConfig(
             ignition_lat=53.55,
             ignition_lng=-113.50,
             duration_hours=0.5,
-            n_iterations=3,
-            jitter_m=0.0,       # No jitter
-            wind_speed_pct=0.0,  # No weather variation
+            n_iterations=1,
+            jitter_m=0.0,
+            wind_speed_pct=0.0,
             rh_abs=0.0,
             base_seed=1,
         )
         result = run_monte_carlo(cfg, small_grid, moderate_conditions)
 
-        # Find the max probability — with identical inputs, heavily burned
-        # cells near ignition should approach P=1.0
+        # With n=1, every cell that burned must have P exactly 1.0
         max_p = max(val for row in result.burn_probability for val in row)
-        assert max_p == pytest.approx(1.0, abs=0.01), (
-            f"Expected max P ≈ 1.0 with no jitter/variation, got {max_p:.3f}"
+        assert max_p == pytest.approx(1.0, abs=0.001), (
+            f"Expected max P = 1.0 with n_iterations=1, got {max_p:.3f}"
+        )
+
+        # And every non-zero probability must equal exactly 1.0
+        non_zero = [
+            val for row in result.burn_probability for val in row if val > 0
+        ]
+        assert all(v == pytest.approx(1.0, abs=0.001) for v in non_zero), (
+            "With n_iterations=1, all burned cells must have P = 1.0"
         )
 
 

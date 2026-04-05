@@ -1,0 +1,28 @@
+app = "firesim-api"
+primary_region = "yyz"
+
+[build]
+  dockerfile = "api/Dockerfile"
+  build_context = "."
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[env]
+  # Set FIRESIM_CORS_ORIGINS to your Vercel URL after first deploy, e.g.:
+  # FIRESIM_CORS_ORIGINS = "https://wildfire-simulator.vercel.app"
+  FIRESIM_CORS_ORIGINS = "*"

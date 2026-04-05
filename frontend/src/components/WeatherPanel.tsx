@@ -263,15 +263,20 @@ export default function WeatherPanel({
   const hasErrors = Object.keys(validationErrors).length > 0;
 
   const EDMONTON_FUEL_GRID_PATH =
-    "/home/rpas/dev/wildfire/wildfire-simulator-v3/data/Edmonton_FBP_FuelLayer_20251105_10m.tif";
+    import.meta.env.VITE_EDMONTON_FUEL_GRID_PATH ??
+    "/app/data/Edmonton_FBP_FuelLayer_20251105_10m.tif";
   const EDMONTON_WATER_PATH =
-    "/home/rpas/dev/wildfire/wildfire-simulator-v3/data/edmonton_water_bodies.geojson.gz";
+    import.meta.env.VITE_EDMONTON_WATER_PATH ??
+    "/app/data/edmonton_water_bodies.geojson.gz";
   const EDMONTON_BUILDINGS_PATH =
-    "/home/rpas/dev/wildfire/wildfire-simulator-v3/data/edmonton_buildings.geojson.gz";
+    import.meta.env.VITE_EDMONTON_BUILDINGS_PATH ??
+    "/app/data/edmonton_buildings.geojson.gz";
   const EDMONTON_WUI_PATH =
-    "/home/rpas/dev/wildfire/wildfire-simulator-v3/data/wui_zones.geojson.gz";
+    import.meta.env.VITE_EDMONTON_WUI_PATH ??
+    "/app/data/wui_zones.geojson.gz";
   const EDMONTON_DEM_PATH =
-    "/home/rpas/dev/wildfire/wildfire-simulator-v3/data/edmonton_dem.tif";
+    import.meta.env.VITE_EDMONTON_DEM_PATH ??
+    "/app/data/edmonton_dem.tif";
 
   const handleMonteCarlo = () => {
     if (!ignitionPoint || !onComputeBurnProbability || hasErrors) return;

@@ -123,12 +123,17 @@ export default function EOCConsole({
   const [spotFiresVisible, setSpotFiresVisible] = useState(true);
 
   // ── Map markup state ─────────────────────────────────────────────────────
+  // All markup is stored in geographic (LngLat) coordinates so it stays
+  // anchored to the map when panning or zooming.
   type MarkupTool = "pen" | "text" | null;
+  type GeoPoint = { lng: number; lat: number };
+
   const [markupTool, setMarkupTool] = useState<MarkupTool>(null);
-  const [penPaths, setPenPaths] = useState<string[]>([]);
-  const [currentPenPath, setCurrentPenPath] = useState<string | null>(null);
-  const [textMarkers, setTextMarkers] = useState<Array<{ x: number; y: number; text: string }>>([]);
+  const [penPaths, setPenPaths] = useState<GeoPoint[][]>([]); // each path = array of LngLat
+  const [currentPenPath, setCurrentPenPath] = useState<GeoPoint[]>([]);
+  const [textMarkers, setTextMarkers] = useState<Array<{ geo: GeoPoint; text: string }>>([]);
   const [pendingTextPos, setPendingTextPos] = useState<{ x: number; y: number } | null>(null);
+  const [mapRenderKey, setMapRenderKey] = useState(0); // bumped on map move → forces geo→pixel recalc
   const isPenDownRef = useRef(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
@@ -140,50 +145,84 @@ export default function EOCConsole({
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }, []);
 
+  // Convert SVG pixel coords → geographic LngLat
+  const pixelToGeo = useCallback((x: number, y: number): GeoPoint => {
+    const map = consoleMapRef.current;
+    if (!map) return { lng: 0, lat: 0 };
+    const ll = map.unproject([x, y]);
+    return { lng: ll.lng, lat: ll.lat };
+  }, []);
+
+  // Convert geographic LngLat → SVG pixel coords (depends on mapRenderKey so it refreshes on move)
+  const geoToPixel = useCallback((geo: GeoPoint): { x: number; y: number } => {
+    const map = consoleMapRef.current;
+    if (!map) return { x: 0, y: 0 };
+    const p = map.project([geo.lng, geo.lat]);
+    return { x: p.x, y: p.y };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapRenderKey]); // intentionally depends on render key so pixels refresh after map moves
+
+  // Build an SVG path string from an array of geo points
+  const geoPathToSvgD = useCallback((points: GeoPoint[]): string => {
+    if (points.length === 0) return "";
+    return points.map((geo, i) => {
+      const { x, y } = geoToPixel(geo);
+      return `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    }).join(" ");
+  }, [geoToPixel]);
+
   const handleSvgMouseDown = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     e.preventDefault();
     const { x, y } = getSvgCoords(e);
     if (markupTool === "pen") {
       isPenDownRef.current = true;
-      setCurrentPenPath(`M ${x.toFixed(1)} ${y.toFixed(1)}`);
+      setCurrentPenPath([pixelToGeo(x, y)]);
     } else if (markupTool === "text") {
       setPendingTextPos({ x, y });
     }
-  }, [markupTool, getSvgCoords]);
+  }, [markupTool, getSvgCoords, pixelToGeo]);
 
   const handleSvgMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     if (markupTool !== "pen" || !isPenDownRef.current) return;
     const { x, y } = getSvgCoords(e);
-    setCurrentPenPath(prev => prev ? `${prev} L ${x.toFixed(1)} ${y.toFixed(1)}` : `M ${x.toFixed(1)} ${y.toFixed(1)}`);
-  }, [markupTool, getSvgCoords]);
+    setCurrentPenPath(prev => [...prev, pixelToGeo(x, y)]);
+  }, [markupTool, getSvgCoords, pixelToGeo]);
 
   const handleSvgMouseUp = useCallback(() => {
     if (markupTool !== "pen") return;
     isPenDownRef.current = false;
     setCurrentPenPath(prev => {
-      if (prev) setPenPaths(paths => [...paths, prev]);
-      return null;
+      if (prev.length > 0) setPenPaths(paths => [...paths, prev]);
+      return [];
     });
   }, [markupTool]);
 
   const handleTextSubmit = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && pendingTextPos) {
       const text = e.currentTarget.value.trim();
-      if (text) setTextMarkers(prev => [...prev, { ...pendingTextPos, text }]);
+      if (text) {
+        const geo = pixelToGeo(pendingTextPos.x, pendingTextPos.y);
+        setTextMarkers(prev => [...prev, { geo, text }]);
+      }
       setPendingTextPos(null);
     } else if (e.key === "Escape") {
       setPendingTextPos(null);
     }
-  }, [pendingTextPos]);
+  }, [pendingTextPos, pixelToGeo]);
 
   const clearMarkup = useCallback(() => {
     setPenPaths([]);
     setTextMarkers([]);
-    setCurrentPenPath(null);
+    setCurrentPenPath([]);
   }, []);
 
   const handleMapRefCallback = useCallback((m: maplibregl.Map) => {
     consoleMapRef.current = m;
+    // Re-render markup SVG whenever the map view changes
+    const bump = () => setMapRenderKey(k => k + 1);
+    m.on("move", bump);
+    m.on("zoom", bump);
+    m.on("rotate", bump);
   }, []);
 
   // ── Map snapshot capture ──────────────────────────────────────────────────
@@ -389,11 +428,17 @@ export default function EOCConsole({
             onMouseUp={handleSvgMouseUp}
             onMouseLeave={handleSvgMouseUp}
           >
-            {penPaths.map((d, i) => <path key={i} d={d} className="eoc-markup-path" />)}
-            {currentPenPath && <path d={currentPenPath} className="eoc-markup-path eoc-markup-path--live" />}
-            {textMarkers.map((m, i) => (
-              <text key={i} x={m.x} y={m.y} className="eoc-markup-text">{m.text}</text>
-            ))}
+            {penPaths.map((points, i) => {
+              const d = geoPathToSvgD(points);
+              return d ? <path key={i} d={d} className="eoc-markup-path" /> : null;
+            })}
+            {currentPenPath.length > 0 && (
+              <path d={geoPathToSvgD(currentPenPath)} className="eoc-markup-path eoc-markup-path--live" />
+            )}
+            {textMarkers.map((m, i) => {
+              const { x, y } = geoToPixel(m.geo);
+              return <text key={i} x={x} y={y} className="eoc-markup-text">{m.text}</text>;
+            })}
           </svg>
 
           {/* Floating text input when placing a label */}
@@ -442,7 +487,7 @@ export default function EOCConsole({
               className="eoc-markup-tool"
               onClick={clearMarkup}
               title="Clear all markup"
-              disabled={penPaths.length === 0 && textMarkers.length === 0}
+              disabled={penPaths.length === 0 && textMarkers.length === 0 && currentPenPath.length === 0}
             >⌫</button>
           </div>
 

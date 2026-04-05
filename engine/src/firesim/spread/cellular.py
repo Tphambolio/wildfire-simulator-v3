@@ -131,6 +131,7 @@ def run_cellular_simulation(
             for c in range(max(0, ign_col - 5), min(cols, ign_col + 6)):
                 if fuel_grid.fuel_types[r][c] is not None:
                     ign_row, ign_col = r, c
+                    ign_fuel = fuel_grid.fuel_types[r][c]
                     found = True
                     break
             if found:
@@ -179,6 +180,23 @@ def run_cellular_simulation(
     last_mean_ros = 0.0  # mean ROS of active burning cells at last timestep
     all_spot_fires: list[SpotFire] = []
     snapshot_spot_fires: list[SpotFire] = []
+
+    # Seed ignition cell so the t=0 snapshot is non-empty (ignition cell is burning,
+    # not yet spread-to, so it is never added by the spread loop).
+    if ign_fuel is not None:
+        ign_ros, ign_hfi, _ign_lbr, ign_fire_type = get_fbp(ign_fuel)
+        ign_lat_pos = lat_max - (ign_row + 0.5) * cell_lat
+        ign_lng_pos = lng_min + (ign_col + 0.5) * cell_lng
+        _ign_cell = BurnedCell(
+            lat=ign_lat_pos,
+            lng=ign_lng_pos,
+            intensity=ign_hfi,
+            fuel_type=ign_fuel.value,
+            timestep=0,
+            fire_type=ign_fire_type.value,
+        )
+        all_burned_cells.append(_ign_cell)
+        snapshot_burned_cells.append(_ign_cell)
 
     # Fire spread direction (opposite of wind FROM)
     spread_dir = (conditions.wind_direction + 180.0) % 360.0
@@ -471,33 +489,50 @@ def _elliptical_spread_prob(
     cell_size: float,
     dt: float,
 ) -> float:
-    """Calculate spread probability to a neighbor based on elliptical ROS.
+    """Calculate spread probability to a neighbor using the FBP directional ROS.
 
-    Higher probability in the head fire direction, lower on flanks/backing.
+    Uses geometric interpolation between the three FBP reference points:
+      θ = 0°   → head_ros   (maximum, downwind)
+      θ = 90°  → flank_ros  = head_ros / LBR  (perpendicular to wind)
+      θ = 180° → back_ros   = head_ros / LBR² (upwind)
+
+    The formula is:
+      dir_ros(θ) = head_ros × (back_ros / head_ros)^(θ / π)
+                 = head_ros × LBR^(−2θ / π)
+
+    This satisfies all three FBP reference conditions exactly:
+      At θ=0:    head_ros × 1            = head_ros  ✓
+      At θ=π/2:  head_ros × (1/LBR²)^½  = head_ros/LBR = flank_ros  ✓
+      At θ=π:    head_ros × (1/LBR²)^1  = head_ros/LBR² = back_ros  ✓
+
+    The polar-conic focus formula (a(1−e²)/(1−e·cosθ)) was tried but gives
+    flank_ros/LBR at θ=90° instead of flank_ros — under high LBR this makes
+    flank probability so low that the fire stalls when the head direction is
+    blocked by non-fuel (roads, water bodies).
+
+    Reference: FBP System ST-X-3; Alexander & de Groot (1988).
     """
-    # Angle between neighbor direction and head fire direction
-    diff = math.radians(neighbor_angle - spread_dir)
-    cos_d = math.cos(diff)
-    sin_d = math.sin(diff)
+    head_ros = ros
+    if head_ros < 1e-10:
+        return 0.0  # no spread
 
-    # Elliptical ROS in this direction
-    # Semi-axes: head ROS along spread direction, flank ROS perpendicular
-    a = ros  # head direction
-    b = ros / max(lbr, 1.0)  # flank direction
+    back_ros = calculate_back_ros(head_ros, lbr)  # head_ros / LBR²
 
-    denom = math.sqrt((b * cos_d) ** 2 + (a * sin_d) ** 2)
-    if denom < 1e-10:
-        dir_ros = a
-    else:
-        dir_ros = a * b / denom
+    # Angular separation from head fire direction, normalised to [0°, 180°]
+    raw_diff = (neighbor_angle - spread_dir) % 360.0
+    if raw_diff > 180.0:
+        raw_diff = 360.0 - raw_diff
+    theta_rad = math.radians(raw_diff)  # in [0, π]
+
+    # Geometric interpolation: dir_ros = head_ros × (back_ros/head_ros)^(θ/π)
+    ratio = back_ros / head_ros  # = 1/LBR² ∈ (0, 1]
+    dir_ros = head_ros * (ratio ** (theta_rad / math.pi))
 
     # Distance fire can travel in this timestep
-    dist = dir_ros * dt  # meters
+    dist = dir_ros * dt  # metres
 
-    # Probability = fraction of cell covered
-    prob = min(1.0, dist / cell_size)
-
-    return prob
+    # Probability = fraction of cell size covered
+    return min(1.0, dist / cell_size)
 
 
 def _make_frame(

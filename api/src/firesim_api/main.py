@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -46,10 +47,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS — allow frontend dev server
+    # CORS — defaults to "*" for local dev; set FIRESIM_CORS_ORIGINS in production
+    _cors_origins = os.environ.get("FIRESIM_CORS_ORIGINS", "*").split(",")
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=_cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

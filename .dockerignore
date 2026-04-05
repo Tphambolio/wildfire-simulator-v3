@@ -1,0 +1,21 @@
+# Keep the build context lean
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.venv
+node_modules
+frontend/dist
+frontend/node_modules
+frontend/.env.local
+frontend/.env.production
+coverage
+htmlcov
+.coverage
+*.log
+.DS_Store
+Thumbs.db
+.git
+.github

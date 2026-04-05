@@ -221,12 +221,17 @@ function wrapForm(title: string, sections: string[], opts: ICSFormOptions, orien
       size: ${pageSize};
       margin: 0.75in;
     }
-    @page :left { @top-left { content: "${headerText}"; font-size: 11px; color: #475569; } }
-    @page :right { @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 11px; color: #475569; } }
+    /* Running header: form title tracks across all printed pages via string-set */
+    @page {
+      @top-left { content: "${headerText}"; font-size: 10px; color: #475569; font-family: "Helvetica", "Arial", sans-serif; }
+      @bottom-right { content: string(icsFormTitle) " — pg " counter(page) " of " counter(pages); font-size: 10px; color: #475569; font-family: "Helvetica", "Arial", sans-serif; }
+    }
+    @page :first { @top-left { content: none; } @bottom-right { content: none; } }
     body { font-family: "Helvetica", "Arial", sans-serif; margin: 0; color: #111827; background: #f8fafc; font-size: 13px; line-height: 1.5; }
     .ics-container { background: #ffffff; border: 2px solid #0f172a; border-radius: 12px; padding: 24px 28px; }
     .ics-header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
-    .ics-header__title { font-size: 20px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+    /* string-set captures the form title so it repeats in @page margin on every page */
+    .ics-header__title { font-size: 20px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; string-set: icsFormTitle content(); }
     .ics-header__meta { font-size: 11px; color: #475569; text-transform: uppercase; letter-spacing: 0.1em; }
     table.kv { width: 100%; border-collapse: collapse; margin-top: 4px; }
     table.kv th, table.kv td { border: 1px solid #1f2937; padding: 6px 8px; vertical-align: top; }
@@ -676,6 +681,10 @@ export function buildFullIAPHTML(opts: ICSFormOptions): string {
     buildICS206HTML(opts),
   ];
 
+  // Form codes for page numbering (index-aligned with forms array)
+  const FORM_CODES = ["ICS 201", "ICS 202", "ICS 203", "ICS 204", "ICS 205", "ICS 206"];
+  const totalForms = forms.length;
+
   // Extract body content from each form — use string slicing instead of regex so
   // injected <script> tags after the container don't break the match.
   const CONTAINER_OPEN = '<div class="ics-container">';
@@ -687,6 +696,19 @@ export function buildFullIAPHTML(opts: ICSFormOptions): string {
     return end > contentStart ? html.slice(contentStart, end) : "";
   });
 
+  // Inject IAP sheet position into each form's header meta, and append a notes fill zone
+  const bodiesWithPagination = bodies.map((b, i) => {
+    // "IAP Sheet X of Y" = this form's position in the package (not printed page number)
+    const withSheetNum = b.replace(
+      'class="ics-header__meta">',
+      `class="ics-header__meta"><strong class="iap-pg-label">${FORM_CODES[i]} &nbsp;&bull;&nbsp; IAP Sheet ${i + 1} of ${totalForms}</strong> &nbsp;&bull;&nbsp; `,
+    );
+    return (
+      withSheetNum +
+      `<div class="iap-notes" contenteditable="true" spellcheck="false"><span class="iap-notes-hint">Notes / additional information</span></div>`
+    );
+  });
+
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
 
@@ -696,34 +718,79 @@ export function buildFullIAPHTML(opts: ICSFormOptions): string {
   <meta charset="utf-8" />
   <title>Incident Action Plan — ${esc(opts.incidentName)} — ${dateStr}</title>
   <style>
-    @page { margin: 0.75in; }
-    @page :right { @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 11px; color: #475569; } }
+    @page {
+      margin: 0.6in 0.7in;
+      /* Running form title — picks up string-set from .ics-header__title */
+      @top-right {
+        content: string(icsFormTitle) " — pg " counter(page) " of " counter(pages);
+        font-size: 10px; color: #475569;
+        font-family: "Helvetica", "Arial", sans-serif;
+      }
+    }
+    /* Cover page and first form page: suppress the running header */
+    @page :first { @top-right { content: none; } }
     body { font-family: "Helvetica", "Arial", sans-serif; margin: 0; color: #111827; background: #ffffff; font-size: 13px; line-height: 1.5; }
-    .ics-container { background: #ffffff; border: 2px solid #0f172a; border-radius: 12px; padding: 24px 28px; margin-bottom: 0; }
-    .ics-header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
-    .ics-header__title { font-size: 20px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
-    .ics-header__meta { font-size: 11px; color: #475569; text-transform: uppercase; letter-spacing: 0.1em; }
+    /* Cover page */
+    .iap-cover { text-align: center; padding: 80px 40px; page-break-after: always; break-after: page; border-bottom: 3px solid #0f172a; }
+    .iap-cover h1 { font-size: 32px; font-weight: 800; text-transform: uppercase; letter-spacing: -0.01em; margin-bottom: 12px; }
+    .iap-cover .iap-meta { font-size: 14px; color: #475569; }
+    /* Each form fills a page — no outer border, just page margins */
+    .iap-page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding-bottom: 16px;
+    }
+    .page-break { page-break-before: always; break-before: page; }
+    @media print { .iap-page { min-height: auto; padding-bottom: 0; } }
+    /* Container: no card border — page boundary is the margin */
+    .ics-container { background: #ffffff; padding: 0; flex: 1; display: flex; flex-direction: column; }
+    .ics-header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #0f172a; padding-bottom: 10px; margin-bottom: 14px; }
+    /* string-set captures form title so @page top-right repeats it on every printed page */
+    .ics-header__title { font-size: 20px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; string-set: icsFormTitle content(); }
+    .ics-header__meta { font-size: 11px; color: #475569; text-transform: uppercase; letter-spacing: 0.08em; }
+    .iap-pg-label { color: #1d4ed8; font-weight: 700; letter-spacing: 0.06em; }
     table.kv { width: 100%; border-collapse: collapse; margin-top: 4px; }
     table.kv th, table.kv td { border: 1px solid #1f2937; padding: 6px 8px; vertical-align: top; }
     table.kv th { background: #e9efff; width: 30%; font-weight: 600; }
     ul { margin: 0; padding-left: 20px; }
     .muted { color: #6b7280; font-style: italic; }
-    .map-block { margin-top: 12px; border: 2px solid #1d4ed8; border-radius: 12px; padding: 12px; background: #eff6ff; }
-    .map-block img { width: 100%; max-width: 720px; border: 1px solid #93c5fd; border-radius: 6px; }
+    .map-block { margin-top: 12px; border: 2px solid #1d4ed8; border-radius: 8px; padding: 12px; background: #eff6ff; }
+    .map-block img { width: 100%; max-width: 720px; border: 1px solid #93c5fd; border-radius: 4px; }
     .map-legend { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }
     .map-legend li { display: flex; align-items: center; gap: 4px; }
     .map-legend span { display: inline-block; width: 12px; height: 12px; border-radius: 2px; border: 1px solid #0f172a; flex-shrink: 0; }
-    .ics-block { border: 2px solid #0f172a; border-radius: 10px; margin-bottom: 16px; overflow: hidden; page-break-inside: avoid; break-inside: avoid; }
-    .ics-block header { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: #0f172a; color: #f8fafc; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
-    .ics-block__number { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #1d4ed8; font-size: 13px; flex-shrink: 0; }
+    .ics-block { border: 1px solid #1f2937; border-radius: 6px; margin-bottom: 12px; overflow: hidden; page-break-inside: avoid; break-inside: avoid; }
+    .ics-block header { display: flex; align-items: center; gap: 12px; padding: 7px 12px; background: #0f172a; color: #f8fafc; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+    .ics-block__number { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: #1d4ed8; font-size: 12px; flex-shrink: 0; }
     .ics-block__title { font-size: 13px; }
-    .ics-block__body { padding: 12px 14px 16px; background: #ffffff; }
-    .page-break { page-break-before: always; break-before: page; }
+    .ics-block__body { padding: 10px 12px 14px; background: #ffffff; }
     h4 { margin: 10px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #374151; }
-    .generated-note { font-size: 11px; color: #6b7280; font-style: italic; margin-top: 16px; border-top: 1px solid #e5e7eb; padding-top: 8px; }
-    .iap-cover { text-align: center; padding: 60px 40px; border: 2px solid #0f172a; border-radius: 12px; margin-bottom: 40px; }
-    .iap-cover h1 { font-size: 32px; font-weight: 800; text-transform: uppercase; letter-spacing: -0.01em; margin-bottom: 12px; }
-    .iap-cover .iap-meta { font-size: 14px; color: #475569; }
+    .generated-note { font-size: 11px; color: #6b7280; font-style: italic; margin-top: 12px; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+    /* Edit-hint hidden in IAP (redundant with notes zone) */
+    .edit-hint { display: none; }
+    /* Editable notes fill — expands to fill remaining page space */
+    .iap-notes {
+      flex: 1;
+      min-height: 60px;
+      margin-top: 8px;
+      padding: 8px 10px;
+      border: 1px dashed #d1d5db;
+      border-radius: 4px;
+      color: #9ca3af;
+      font-size: 12px;
+      cursor: text;
+    }
+    .iap-notes:focus { outline: 1px solid #93c5fd; color: #111827; }
+    .iap-notes-hint { font-style: italic; pointer-events: none; }
+    /* Editable cell styles */
+    [contenteditable="true"]:hover { background: #fefce8 !important; outline: 1px dashed #ca8a04; outline-offset: 1px; border-radius: 2px; }
+    [contenteditable="true"]:focus { background: #fef9c3 !important; outline: 2px solid #d97706; outline-offset: 1px; border-radius: 2px; }
+    @media print {
+      .iap-notes { border: none; min-height: 0; color: #111827; }
+      .iap-notes-hint { display: none; }
+      [contenteditable] { outline: none !important; background: transparent !important; }
+    }
   </style>
 </head>
 <body>
@@ -732,8 +799,8 @@ export function buildFullIAPHTML(opts: ICSFormOptions): string {
     <div class="iap-meta">${esc(opts.incidentName)} &bull; ${dateStr} &bull; Generated by FireSim V3</div>
     <div class="iap-meta" style="margin-top:8px">Contains: ICS-201 &bull; ICS-202 &bull; ICS-203 &bull; ICS-204 &bull; ICS-205 &bull; ICS-206</div>
   </div>
-  ${bodies.map((b, i) =>
-    `<div class="${i > 0 ? "page-break" : ""}"><div class="ics-container">${b}</div></div>`
+  ${bodiesWithPagination.map((b, i) =>
+    `<div class="${i > 0 ? "page-break " : ""}iap-page"><div class="ics-container">${b}</div></div>`
   ).join("\n")}
   <script>
     document.querySelectorAll('td').forEach(function(td) {

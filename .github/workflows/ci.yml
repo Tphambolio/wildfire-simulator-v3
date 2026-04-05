@@ -58,3 +58,6 @@ jobs:
           npm ci
           npx tsc --noEmit
           npm run build
+
+  # Note: API deploy is manual (fly deploy --local-only) because data files
+  # (~20 MB Edmonton spatial data) are git-ignored and must be bundled locally.
